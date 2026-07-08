@@ -9,7 +9,6 @@ the synthetic rows, ready for PointsPredictor.predict.
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 
 from .features import compute_features, load_fixtures, load_player_gameweeks, load_players

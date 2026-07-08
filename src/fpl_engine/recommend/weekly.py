@@ -13,13 +13,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-import numpy as np
 import pandas as pd
 from sqlalchemy import select
 
 from ..config import settings
 from ..db.models import Fixture, MyTeamPick, MyTeamState
-from ..db.session import get_engine, session_scope
+from ..db.session import get_engine
 from ..models.features import build_feature_frame, load_fixtures, load_teams
 from ..models.predictor import PointsPredictor, availability_for_rows
 from ..models.prices import PriceModel
@@ -29,7 +28,7 @@ from ..optim.planner import TransferPlan, TransferPlanner
 from ..optim.squad import OptimizedSquad, SquadOptimizer
 from ..rules.chips import ChipState, available_chips
 from ..rules.constants import rules_for
-from ..sim.monte_carlo import SimulationResult, simulate_gameweek
+from ..sim.monte_carlo import simulate_gameweek
 
 DEFAULT_HORIZON = 6
 
@@ -253,7 +252,7 @@ def _captain_reason(pid: int, pred: pd.DataFrame, names: dict[int, str]) -> str:
     r = rows.iloc[0]
     venue = "home" if bool(r["was_home"]) else "away"
     parts = [
-        f"{names.get(pid, pid)} ({venue}): E[goals] {r['e_goals']:.2f}, E[assists] {r['e_assists']:.2f}",
+        f"{names.get(pid, pid)} ({venue}): E(goals) {r['e_goals']:.2f}, E(assists) {r['e_assists']:.2f}",
         f"team expected goals {r['lambda_team']:.2f} vs opponent {r['lambda_opp']:.2f}",
         f"start probability {r['p_start']:.0%}",
     ]

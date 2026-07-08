@@ -20,7 +20,6 @@ from rich.console import Console
 from rich.table import Table
 from scipy.stats import spearmanr
 
-from ..models.dixon_coles import matches_frame
 from ..models.features import build_feature_frame, load_fixtures, load_teams
 from ..models.predictor import PointsPredictor
 from ..rules.constants import rules_for

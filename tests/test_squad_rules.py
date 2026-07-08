@@ -1,6 +1,5 @@
 """Squad legality, autosubs, transfers, and chip tests."""
 
-import pytest
 
 from fpl_engine.rules import (
     ChipState,

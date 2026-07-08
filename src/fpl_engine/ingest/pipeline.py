@@ -13,6 +13,20 @@ from .fpl_api import FplApiClient
 console = Console()
 
 
+def detect_season(bootstrap: dict) -> str:
+    """Derive the season label ("2026-27") from GW1's deadline in bootstrap.
+
+    This makes `fpl update` roll over automatically when the new game launches,
+    without a config change.
+    """
+    events = bootstrap.get("events") or []
+    if not events:
+        return settings.season
+    first_deadline = events[0].get("deadline_time", "")
+    year = int(first_deadline[:4])
+    return f"{year}-{str(year + 1)[-2:]}"
+
+
 def update_current_season(season: str | None = None, with_player_history: bool = True) -> dict:
     """Pull bootstrap, fixtures, and (optionally) every player's per-fixture history.
 
@@ -20,11 +34,17 @@ def update_current_season(season: str | None = None, with_player_history: bool =
     canonical per-fixture dataset for the current season including xG and
     defensive contribution.
     """
-    season = season or settings.season
     counts: dict[str, int] = {}
     with FplApiClient() as api:
         bootstrap = api.bootstrap_static()
         fixtures = api.fixtures()
+        season = season or detect_season(bootstrap)
+        if season != settings.season:
+            console.print(
+                f"[yellow]API is serving season {season} (config says {settings.season}); "
+                f"ingesting as {season}. Update FPL_SEASON and review rules/constants.py "
+                f"for new-season rule changes.[/yellow]"
+            )
 
         with session_scope() as session:
             counts["teams"] = store.upsert_teams(session, season, bootstrap["teams"])

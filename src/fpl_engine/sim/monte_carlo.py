@@ -66,7 +66,6 @@ def simulate_gameweek(
     n = len(df)
 
     pos = df["position"].values.astype(int)
-    p_start = df["p_start"].values
     p60_given_play = np.divide(
         df["p60"].values, np.clip(df["p_play"].values, 1e-9, None)
     ).clip(0, 1)
