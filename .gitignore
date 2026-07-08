@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+dist/
+
+# Data (local DB + raw snapshots are re-fetchable)
+data/
+
+# ML artifacts
+models_store/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Node (Phase 2)
+web/node_modules/
+web/.next/
