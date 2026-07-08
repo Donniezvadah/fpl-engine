@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..config import settings
@@ -21,7 +21,19 @@ def get_engine(db_path: Path | None = None):
     if _engine is None:
         path = db_path or settings.db_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        _engine = create_engine(f"sqlite:///{path}", future=True)
+        _engine = create_engine(
+            f"sqlite:///{path}",
+            future=True,
+            connect_args={"timeout": 60},  # ride out concurrent ingest writers
+        )
+
+        @event.listens_for(_engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, _record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+
         Base.metadata.create_all(_engine)
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     return _engine

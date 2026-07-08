@@ -72,10 +72,15 @@ def sync_my_team(season: str | None = None) -> dict:
 
 def backfill_history(seasons: list[str]) -> dict:
     """One-time load of older seasons from the vaastav GitHub archive."""
-    from .history import load_season
+    from .history import load_season, load_season_fixtures_teams
 
     counts = {}
     for s in seasons:
         console.print(f"loading {s} from GitHub archive…")
-        counts[s] = load_season(s)
+        n_fx, n_teams = load_season_fixtures_teams(s)
+        counts[s] = {
+            "player_rows": load_season(s),
+            "fixtures": n_fx,
+            "teams": n_teams,
+        }
     return counts

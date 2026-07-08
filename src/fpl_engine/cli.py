@@ -71,13 +71,19 @@ def recommend(
     horizon: int = typer.Option(6, help="Gameweeks to plan ahead."),
     sims: int = typer.Option(10_000, help="Monte Carlo simulations."),
     train_seasons: list[str] = typer.Option([], "--train-season"),
+    as_of_gw: int = typer.Option(
+        None, help="Replay a past deadline (models see only earlier GWs)."
+    ),
 ) -> None:
     """Weekly recommendations: transfers, captain, chips, differentials."""
     from .recommend.render import print_report
     from .recommend.weekly import build_weekly_report
 
     report = build_weekly_report(
-        horizon=horizon, n_sims=sims, train_seasons=list(train_seasons)
+        horizon=horizon,
+        n_sims=sims,
+        train_seasons=list(train_seasons),
+        as_of_gw=as_of_gw,
     )
     print_report(report)
 

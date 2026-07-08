@@ -45,12 +45,23 @@ def synthesize_future_rows(
 
 
 def build_prediction_rows(
-    seasons: list[str], target_season: str, target_gws: list[int]
+    seasons: list[str],
+    target_season: str,
+    target_gws: list[int],
+    cutoff_gw: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Returns (prediction_rows_with_features, players_frame)."""
+    """Returns (prediction_rows_with_features, players_frame).
+
+    `cutoff_gw` drops target-season rows from GW `cutoff_gw` onwards before
+    feature building — an honest as-of-deadline view for retrospective runs.
+    """
     history = load_player_gameweeks(seasons)
     fixtures = load_fixtures(seasons)
     players = load_players(target_season)
+    if cutoff_gw is not None:
+        history = history[
+            (history["season"] != target_season) | (history["event"] < cutoff_gw)
+        ]
 
     future = synthesize_future_rows(target_season, players, fixtures, target_gws)
     if future.empty:

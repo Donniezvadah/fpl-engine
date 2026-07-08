@@ -40,6 +40,59 @@ def _i(row: dict, key: str, default: int = 0) -> int:
     return int(_f(row, key, float(default)))
 
 
+def load_season_fixtures_teams(season: str) -> tuple[int, int]:
+    """Ingest a historical season's fixtures.csv and teams.csv (needed by the
+    Dixon-Coles model and team-form features during backtests)."""
+    from ..db.models import Fixture, Team
+    from datetime import datetime
+
+    base = f"{settings.history_base_url}/{season}"
+    fixtures = _fetch_csv(f"{base}/fixtures.csv")
+    teams = _fetch_csv(f"{base}/teams.csv")
+
+    def _kickoff(v: str | None):
+        if not v or v == "None":
+            return None
+        return datetime.fromisoformat(v.replace("Z", "+00:00")).replace(tzinfo=None)
+
+    with session_scope() as session:
+        for t in teams:
+            session.merge(
+                Team(
+                    season=season,
+                    team_id=int(t["id"]),
+                    code=int(t["code"]),
+                    name=t.get("name", ""),
+                    short_name=t.get("short_name", ""),
+                    strength_overall_home=_i(t, "strength_overall_home"),
+                    strength_overall_away=_i(t, "strength_overall_away"),
+                    strength_attack_home=_i(t, "strength_attack_home"),
+                    strength_attack_away=_i(t, "strength_attack_away"),
+                    strength_defence_home=_i(t, "strength_defence_home"),
+                    strength_defence_away=_i(t, "strength_defence_away"),
+                )
+            )
+        for f in fixtures:
+            if not f.get("id"):
+                continue
+            session.merge(
+                Fixture(
+                    season=season,
+                    fixture_id=int(f["id"]),
+                    event=(int(float(f["event"])) if f.get("event") not in (None, "", "None") else None),
+                    kickoff_time=_kickoff(f.get("kickoff_time")),
+                    team_h=int(f["team_h"]),
+                    team_a=int(f["team_a"]),
+                    team_h_score=(_i(f, "team_h_score") if f.get("team_h_score") not in ("", "None", None) else None),
+                    team_a_score=(_i(f, "team_a_score") if f.get("team_a_score") not in ("", "None", None) else None),
+                    team_h_difficulty=_i(f, "team_h_difficulty", 3),
+                    team_a_difficulty=_i(f, "team_a_difficulty", 3),
+                    finished=str(f.get("finished", "False")).lower() in ("true", "1"),
+                )
+            )
+    return len(fixtures), len(teams)
+
+
 def load_season(season: str) -> int:
     """Ingest one historical season (e.g. "2023-24") from GitHub into SQLite."""
     base = f"{settings.history_base_url}/{season}"

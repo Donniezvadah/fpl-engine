@@ -105,20 +105,31 @@ def build_weekly_report(
     horizon: int = DEFAULT_HORIZON,
     n_sims: int = 10_000,
     train_seasons: list[str] | None = None,
+    as_of_gw: int | None = None,
 ) -> WeeklyReport:
+    """`as_of_gw` replays a past deadline: models see only GWs before it (for
+    testing the full pipeline out of season)."""
     season = season or settings.season
     rules = rules_for(season)
-    gw = next_gameweek(season)
+    gw = as_of_gw if as_of_gw is not None else next_gameweek(season)
     gws = [g for g in range(gw, min(gw + horizon, rules.total_gameweeks + 1))]
 
     seasons = [*(train_seasons or []), season]
-    rows, players = build_prediction_rows(seasons, season, gws)
+    rows, players = build_prediction_rows(seasons, season, gws, cutoff_gw=as_of_gw)
     availability = availability_for_rows(rows, players)
 
     train_df = build_feature_frame(seasons)
     train_df = train_df[train_df["minutes"].notna()]
     fixtures = load_fixtures(seasons)
     fx_train = fixtures[fixtures["finished"]]
+    if as_of_gw is not None:
+        train_df = train_df[
+            (train_df["season"] != season) | (train_df["event"] < as_of_gw)
+        ]
+        fx_train = fx_train[
+            (fx_train["season"] != season)
+            | (fx_train["event"].notna() & (fx_train["event"] < as_of_gw))
+        ]
     teams = load_teams(seasons)
 
     predictor = PointsPredictor(rules).fit(train_df, fx_train, teams)
