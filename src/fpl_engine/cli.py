@@ -121,6 +121,26 @@ def recommend(
 
 
 @app.command()
+def export(
+    out: str = typer.Option(
+        "web/public/data", help="Directory to write the static site's data.json into."
+    ),
+    horizon: int = typer.Option(6, help="Gameweeks of expected points to publish."),
+    sims: int = typer.Option(10_000, help="Monte Carlo simulations."),
+    as_of_gw: int = typer.Option(None, help="Replay a past deadline instead of the next one."),
+) -> None:
+    """Bake the current recommendation into static JSON for the web dashboard."""
+    from pathlib import Path
+
+    from .recommend.export import export_site_data
+
+    result = export_site_data(
+        Path(out), horizon=horizon, n_sims=sims, as_of_gw=as_of_gw
+    )
+    console.print(result)
+
+
+@app.command()
 def api(
     host: str = typer.Option("127.0.0.1"),
     port: int = typer.Option(8000),

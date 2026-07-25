@@ -63,6 +63,12 @@ class WeeklyReport:
     differentials: pd.DataFrame
     price_watch: pd.DataFrame
     names: dict[int, str] = field(default_factory=dict)
+    # Per-(player, gameweek) expected points across the whole planning horizon.
+    # The next-gameweek slice is `xp_table`; this keeps the rest so the static
+    # site can let you re-rank players over any horizon without a backend.
+    horizon_xp: pd.DataFrame = field(default_factory=pd.DataFrame)
+    horizon_gws: list[int] = field(default_factory=list)
+    teams: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def next_gameweek(season: str) -> int:
@@ -249,6 +255,9 @@ def build_weekly_report(
         differentials=differentials,
         price_watch=price_watch,
         names=names,
+        horizon_xp=gw_xp,
+        horizon_gws=gws,
+        teams=teams[teams["season"] == season],
     )
 
 

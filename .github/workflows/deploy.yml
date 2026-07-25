@@ -1,0 +1,113 @@
+name: Build and deploy dashboard
+
+on:
+  schedule:
+    # 07:00 UTC Thursday and Friday — after midweek results land and before
+    # typical Friday/Saturday deadlines, so the published numbers are fresh.
+    - cron: "0 7 * * 4,5"
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "Re-download historical seasons (slow; only needed if the cache is cold or corrupt)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "src/**"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once, but let a newer run supersede a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  # Historical seasons used to train the models. The current season is detected
+  # from the date and fetched fresh on every run.
+  HISTORY_SEASONS: "2022-23 2023-24 2024-25 2025-26"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      # The SQLite database holds ~110k historical player-gameweek rows that
+      # never change. Caching it keeps each run to a single current-season
+      # refresh instead of re-downloading four seasons of archives.
+      - name: Restore FPL database
+        id: db-cache
+        uses: actions/cache@v4
+        with:
+          path: data/fpl.sqlite3
+          key: fpl-db-v1-${{ env.HISTORY_SEASONS }}
+          restore-keys: fpl-db-v1-
+
+      - name: Backfill historical seasons
+        if: steps.db-cache.outputs.cache-hit != 'true' || inputs.backfill
+        run: uv run fpl backfill ${{ env.HISTORY_SEASONS }}
+
+      - name: Refresh current season from the FPL API
+        run: uv run fpl update
+
+      - name: Sync linked team
+        # Optional: set the FPL_TEAM_ID repository variable to switch the site
+        # from draft mode to your own squad. Skipped when unset, and tolerated
+        # when the season has not started (no squad is published until then).
+        if: vars.FPL_TEAM_ID != ''
+        env:
+          FPL_TEAM_ID: ${{ vars.FPL_TEAM_ID }}
+        run: uv run fpl sync-team || echo "no squad published yet — staying in draft mode"
+
+      - name: Generate site data
+        env:
+          FPL_TEAM_ID: ${{ vars.FPL_TEAM_ID }}
+        run: uv run fpl export --out web/public/data --horizon 6 --sims 10000
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build static site
+        working-directory: web
+        env:
+          # Project Pages serve from https://<user>.github.io/<repo>
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Disable Jekyll processing
+        run: touch web/out/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

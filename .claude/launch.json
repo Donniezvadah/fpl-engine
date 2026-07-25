@@ -4,14 +4,37 @@
     {
       "name": "api",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "fpl", "api", "--port", "8000"],
+      "runtimeArgs": [
+        "run",
+        "fpl",
+        "api",
+        "--port",
+        "8000"
+      ],
       "port": 8000
     },
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "web"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "web"
+      ],
       "port": 3000
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4321",
+        "--directory",
+        "web/out"
+      ],
+      "port": 4321
     }
   ]
 }

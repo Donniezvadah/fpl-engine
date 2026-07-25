@@ -39,8 +39,32 @@ uv run fpl backtest --season 2025-26 --train-season 2023-24 --train-season 2024-
 
 # weekly decisions
 uv run fpl recommend
-uv run fpl api                                 # JSON API for the web dashboard
+uv run fpl api                                 # JSON API for the local dashboard
 ```
+
+## The dashboard
+
+A GitHub Actions workflow rebuilds the site twice a week and publishes it to
+GitHub Pages, so the current gameweek's numbers are always a URL away. The page
+is a **static export** — the engine bakes its output into a single `data.json`
+and every filter, sort and re-ranking runs in the browser, so there is no server
+to pay for or keep alive.
+
+The player explorer is the point of it: filter by position, price, ownership and
+start probability, then re-rank the whole league over any horizon from one to six
+gameweeks, sorted by expected points or by points per £m.
+
+Build it locally:
+
+```bash
+uv run fpl export                              # writes web/public/data/data.json
+npm ci --prefix web && npm run build --prefix web
+python3 -m http.server 4321 --directory web/out
+```
+
+To point the published site at your own squad instead of a from-scratch draft,
+set an `FPL_TEAM_ID` repository variable — the workflow picks it up and switches
+to linked mode once a deadline has passed.
 
 ## Design principles
 

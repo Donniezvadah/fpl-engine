@@ -1,12 +1,47 @@
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+/** Types and loader for the baked static dataset.
+ *
+ * The published site is a static export with no backend, so the whole dataset
+ * is fetched once as a single JSON file and every filter, sort and re-ranking
+ * afterwards happens in the browser.
+ */
+
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
+export interface Meta {
+  season: string;
+  next_gw: number;
+  mode: "linked" | "draft";
+  horizon_gws: number[];
+  generated_at: string;
+  player_count: number;
+}
+
+export interface Player {
+  id: number;
+  name: string;
+  position: number;
+  position_name: string;
+  team_id: number;
+  club: string;
+  club_short: string;
+  price: number;
+  ownership: number | null;
+  xp: number | null;
+  p_start: number | null;
+  p60: number | null;
+  p_cs: number | null;
+  e_goals: number | null;
+  e_assists: number | null;
+  xp_by_gw: Record<string, number | null>;
+  fixtures_by_gw: Record<string, number>;
+}
 
 export interface CaptainOption {
-  player_id: number;
+  id: number;
   name: string;
   xp: number;
-  p90: number;
   p10: number;
+  p90: number;
   p_haul: number;
   ownership: number;
   reasoning: string;
@@ -15,7 +50,7 @@ export interface CaptainOption {
 export interface ChipEval {
   chip: string;
   event: number;
-  gain_pts: number;
+  gain: number;
   detail: string;
 }
 
@@ -25,17 +60,18 @@ export interface PlannedGw {
   transfers_out: string[];
   hits: number;
   free_transfers: number;
-  captain: string | null;
+  captain: string;
   xi_xp: number;
 }
 
-export interface DraftRow {
-  role: string;
-  player_id: number;
+export interface SquadPlayer {
+  id: number;
   name: string;
-  position: number;
-  value: number;
-  xp: number;
+  role: string;
+  position: number | null;
+  position_name: string;
+  price: number | null;
+  xp: number | null;
 }
 
 export interface Differential {
@@ -45,9 +81,6 @@ export interface Differential {
   value: number;
   ownership: number;
   xp: number;
-  p_cs: number | null;
-  e_goals: number | null;
-  e_assists: number | null;
 }
 
 export interface PriceWatchRow {
@@ -57,48 +90,38 @@ export interface PriceWatchRow {
   p_fall: number;
 }
 
-export interface Report {
-  season: string;
-  next_gw: number;
-  mode: "linked" | "draft";
-  as_of_replay: boolean;
+export interface Dataset {
+  meta: Meta;
   captains: CaptainOption[];
   chips: ChipEval[];
+  plan: PlannedGw[] | null;
+  squad: { kind: string; cost: number | null; players: SquadPlayer[] } | null;
   differentials: Differential[];
   price_watch: PriceWatchRow[];
-  plan: PlannedGw[] | null;
-  draft: DraftRow[] | null;
+  players: Player[];
 }
 
-export interface PlayerRow {
-  player_id: number;
-  name: string;
-  position: number;
-  value: number;
-  ownership: number | null;
-  xp: number;
-  p_start: number | null;
-  p_cs: number | null;
-  e_goals: number | null;
-  e_assists: number | null;
-  n_fixtures: number | null;
-}
-
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+export async function loadDataset(): Promise<Dataset> {
+  const res = await fetch(`${BASE_PATH}/data/data.json`, { cache: "no-store" });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail ?? `HTTP ${res.status}`);
+    throw new Error(
+      `Could not load data.json (HTTP ${res.status}). Run \`uv run fpl export\` to generate it.`,
+    );
   }
   return res.json();
 }
 
-export function fetchReport(asOfGw?: number): Promise<Report> {
-  return get<Report>(`/report${asOfGw ? `?as_of_gw=${asOfGw}` : ""}`);
+/** Total expected points for a player over the first `n` gameweeks of the horizon. */
+export function horizonXp(p: Player, gws: number[], n: number): number {
+  return gws
+    .slice(0, n)
+    .reduce((sum, gw) => sum + (p.xp_by_gw[String(gw)] ?? 0), 0);
 }
 
-export function fetchPlayers(asOfGw?: number): Promise<PlayerRow[]> {
-  return get<PlayerRow[]>(`/players${asOfGw ? `?as_of_gw=${asOfGw}` : ""}`);
+export function horizonFixtures(p: Player, gws: number[], n: number): number {
+  return gws
+    .slice(0, n)
+    .reduce((sum, gw) => sum + (p.fixtures_by_gw[String(gw)] ?? 0), 0);
 }
 
 export const POSITIONS: Record<number, string> = {
@@ -108,5 +131,9 @@ export const POSITIONS: Record<number, string> = {
   4: "FWD",
 };
 
-export const fmtPrice = (tenths: number) => `£${(tenths / 10).toFixed(1)}m`;
-export const fmtPct = (x: number) => `${Math.round(x * 100)}%`;
+export const fmtPrice = (tenths: number | null) =>
+  tenths == null ? "—" : `£${(tenths / 10).toFixed(1)}m`;
+export const fmtPct = (x: number | null) =>
+  x == null ? "—" : `${Math.round(x * 100)}%`;
+export const fmtNum = (x: number | null, dp = 2) =>
+  x == null ? "—" : x.toFixed(dp);
