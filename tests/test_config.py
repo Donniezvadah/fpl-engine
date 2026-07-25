@@ -35,8 +35,8 @@ class TestTeamId:
         assert Settings().team_id == 0
 
     def test_real_id_parses(self, monkeypatch):
-        monkeypatch.setenv("FPL_TEAM_ID", "994469")
-        assert Settings().team_id == 994469
+        monkeypatch.setenv("FPL_TEAM_ID", "1234567")
+        assert Settings().team_id == 1234567
 
     def test_garbage_still_rejected(self, monkeypatch):
         monkeypatch.setenv("FPL_TEAM_ID", "not-a-number")
