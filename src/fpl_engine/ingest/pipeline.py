@@ -74,20 +74,49 @@ def update_current_season(season: str | None = None, with_player_history: bool =
 
 
 def sync_my_team(season: str | None = None) -> dict:
-    """Pull the user's entry: picks for every finished GW + bank/chip state."""
+    """Pull the user's entry: picks for every finished GW + bank/chip state.
+
+    Before the season's first deadline the entry endpoints expose no squad — FPL
+    only publishes picks once a deadline has passed — so this is a no-op then and
+    says so rather than reporting an empty success.
+    """
     season = season or settings.season
     if not settings.team_id:
         raise RuntimeError(
             "FPL_TEAM_ID is not set. Add it to .env (from your Points-page URL)."
         )
     with FplApiClient() as api:
+        entry = api.entry(settings.team_id)
         history = api.entry_history(settings.team_id)
         gws = [row["event"] for row in history.get("current", [])]
         with session_scope() as session:
             for gw in track(gws, description="entry picks"):
                 picks = api.entry_picks(settings.team_id, gw)
                 store.upsert_my_team(session, season, gw, picks, history)
-    return {"gameweeks": len(gws)}
+
+    past = [
+        {
+            "season": s["season_name"],
+            "points": s["total_points"],
+            "rank": s["rank"],
+        }
+        for s in history.get("past", [])
+    ]
+    return {
+        "team_id": settings.team_id,
+        "team_name": entry.get("name"),
+        "manager": " ".join(
+            filter(None, [entry.get("player_first_name"), entry.get("player_last_name")])
+        ),
+        "gameweeks_synced": len(gws),
+        "past_seasons": past,
+        "note": (
+            None
+            if gws
+            else "No squad published yet — FPL exposes picks only after a deadline "
+            "passes. Recommendations run in draft mode until then."
+        ),
+    }
 
 
 def backfill_history(seasons: list[str]) -> dict:

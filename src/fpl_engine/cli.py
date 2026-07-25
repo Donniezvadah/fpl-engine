@@ -38,9 +38,27 @@ def backfill(
 @app.command()
 def sync_team() -> None:
     """Pull your own FPL entry (requires FPL_TEAM_ID in .env)."""
+    from rich.table import Table
+
     from .ingest.pipeline import sync_my_team
 
-    console.print(sync_my_team())
+    result = sync_my_team()
+    console.print(
+        f"[bold]{result['team_name']}[/bold] ({result['manager']}) — "
+        f"entry {result['team_id']}"
+    )
+    console.print(f"gameweeks synced: {result['gameweeks_synced']}")
+    if result["note"]:
+        console.print(f"[yellow]{result['note']}[/yellow]")
+
+    if result["past_seasons"]:
+        t = Table(title="Past seasons")
+        t.add_column("season")
+        t.add_column("points", justify="right")
+        t.add_column("overall rank", justify="right")
+        for s in result["past_seasons"]:
+            t.add_row(s["season"], str(s["points"]), f"{s['rank']:,}")
+        console.print(t)
 
 
 @app.command()

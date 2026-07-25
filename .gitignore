@@ -7,6 +7,11 @@ __pycache__/
 .ruff_cache/
 dist/
 
+# Local config — holds your FPL team id, and anything secret you add later.
+# Commit .env.example instead.
+.env
+.env.local
+
 # Data (local DB + raw snapshots are re-fetchable)
 data/
 
