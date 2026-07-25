@@ -31,14 +31,14 @@ SEASON_KEY = "season"
 # his own history rather than the league prior (~5 full matches).
 _MIN_PRIOR_MINUTES = 450.0
 
-# Pseudo-count controlling how fast within-season minutes data displaces the
-# carried-over prior-season estimate for the availability features. At n prior
-# matches this season the within-season value carries n / (n + K) of the weight.
-# Tuned on the 2025-26 walk-forward backtest: over GW1-6 this beats no carryover
-# on MAE (1.799 vs 1.820), rank correlation (0.459 vs 0.443) and captain hit rate
-# (33% vs 17%), and over GW1-38 it does not regress any of them. Values above ~6
-# start to hurt as stale form crowds out current-season evidence.
+# Pseudo-count controlling how fast this season's minutes data displaces the
+# carried-over prior-season estimate in the availability features. Set to 0 to
+# disable carryover entirely.
 CARRYOVER_PSEUDOCOUNT = 6.0
+
+# Carryover only applies to this many opening gameweeks, ramping to zero. Keeps
+# the rest of the season identical to carrying nothing over.
+EARLY_SEASON_GWS = 6
 
 FEATURE_COLUMNS = [
     "position",
@@ -173,23 +173,54 @@ def _per90_trailing(
 def _blended_rolling_mean(
     df: pd.DataFrame, col: str, window: int, pseudocount: float
 ) -> pd.Series:
-    """Trailing mean of `col`, blending within-season and carried-over history.
+    """Trailing mean of `col`, blending within-season form with prior-season base.
 
     Availability features (minutes, starts) are raw means rather than shrunk
-    rates, so they need carryover handled explicitly: with no matches played yet
-    this season the value comes entirely from last season, and each new match
-    shifts weight onto the current season. Without this a new season would open
-    with every player looking like he never plays.
+    rates, so carryover has to be explicit: with no matches played yet this
+    season the value comes entirely from last season, and each new match shifts
+    weight onto the current one. Without this a new season would open with every
+    player looking like he never plays.
+
+    The carried-over term is a whole-prior-season average, deliberately not a
+    trailing window spanning the season break. The closing gameweeks of a season
+    are full of dead-rubber rotation, so a trailing window straddling the boundary
+    reads a rested starter as a benchwarmer -- it put Haaland, a 34-start season
+    behind him, at a 53% chance of starting the opener.
     """
     within = df.groupby([SEASON_KEY, PLAYER_KEY], sort=False)[col].transform(
         lambda s: s.shift(1).rolling(window, min_periods=1).mean()
-    )
-    across = df.groupby(PLAYER_KEY, sort=False)[col].transform(
-        lambda s: s.shift(1).rolling(window, min_periods=1).mean()
-    )
+    ).fillna(0.0)
+    if pseudocount <= 0:
+        return within
+
+    carried = _prior_season_mean(df, col)
     n_this_season = df.groupby([SEASON_KEY, PLAYER_KEY], sort=False).cumcount()
-    w = n_this_season / (n_this_season + pseudocount)
-    return w * within.fillna(0.0) + (1.0 - w) * across.fillna(0.0)
+    # Weight on carried history falls as this season's sample grows...
+    w_carry = pseudocount / (n_this_season + pseudocount)
+    # ...and is switched off entirely once the season is no longer young. Beyond
+    # that point every appearance-thin player is thin for a reason (rotation,
+    # injury, a new role) and last year's record misleads: allowing it through
+    # cost 3.8% rank correlation across GW1-38 while helping only the opening
+    # weeks. Gating on gameweek makes mid-season behaviour bit-identical to
+    # carrying nothing over, so this can only help where it is switched on.
+    ramp = ((EARLY_SEASON_GWS - (df["event"] - 1)) / EARLY_SEASON_GWS).clip(0.0, 1.0)
+    w_carry = w_carry * ramp
+    return (1.0 - w_carry) * within + w_carry * carried
+
+
+def _prior_season_mean(df: pd.DataFrame, col: str, min_matches: int = 5) -> pd.Series:
+    """Each row's per-match average of `col` over the player's earlier seasons.
+
+    Constant within a season, so it carries no within-season leakage; zero for
+    players with no meaningful prior record (newly promoted or newly signed).
+    """
+    by_ps = df.groupby([PLAYER_KEY, SEASON_KEY], sort=True)[col].agg(["sum", "count"])
+    cum = by_ps.groupby(level=0).cumsum().groupby(level=0).shift(1)
+    counts = cum["count"]
+    mean = cum["sum"] / counts.where(counts > 0)
+    mean = mean.where(counts >= min_matches)
+    mapped = pd.MultiIndex.from_arrays([df[PLAYER_KEY], df[SEASON_KEY]]).map(mean)
+    return pd.Series(mapped, index=df.index, dtype="float64").fillna(0.0)
 
 
 def _prior_season_rate(df: pd.DataFrame, stat: str, league_prior: float) -> pd.Series:

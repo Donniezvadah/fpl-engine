@@ -75,15 +75,18 @@ class TestCrossSeasonContinuity:
     """A player's element id changes between seasons but `code` does not, so
     last season's form must carry into the new season's first gameweek."""
 
+    N_PRIOR = 20  # a realistic partial season of history
+
     def build(self) -> pd.DataFrame:
         # Same player: id 100 in 2025-26 (prolific), id 7 in 2026-27 (no data yet).
         rows = [
             _pgw("2025-26", 100, 555, ev, ev, expected_goals=0.8, goals_scored=1)
-            for ev in range(1, 9)
+            for ev in range(1, self.N_PRIOR + 1)
         ]
         rows.append(_pgw("2026-27", 7, 555, 1, 101, minutes=0))  # upcoming fixture
         fixtures = _fixtures(
-            [("2025-26", ev, ev) for ev in range(1, 9)] + [("2026-27", 1, 101)]
+            [("2025-26", ev, ev) for ev in range(1, self.N_PRIOR + 1)]
+            + [("2026-27", 1, 101)]
         )
         return compute_features(pd.DataFrame(rows), fixtures)
 
@@ -111,6 +114,25 @@ class TestCrossSeasonContinuity:
         assert feats[PLAYER_KEY].nunique() == 2
         new = feats[feats["season"] == "2026-27"].iloc[0]
         assert new["roll8_minutes"] == 0.0
+
+    def test_end_of_season_rotation_does_not_sink_carryover(self):
+        """A nailed starter rested for the final gameweeks must still read as a
+        starter in the new season — the flaw that put Haaland at 53% to start."""
+        rows = [_pgw("2025-26", 100, 777, ev, ev) for ev in range(1, 35)]
+        # Final two matches rested (dead rubbers).
+        rows += [
+            _pgw("2025-26", 100, 777, ev, ev, minutes=0, started=0)
+            for ev in range(35, 37)
+        ]
+        rows.append(_pgw("2026-27", 9, 777, 1, 201, minutes=0))
+        fixtures = _fixtures(
+            [("2025-26", ev, ev) for ev in range(1, 37)] + [("2026-27", 1, 201)]
+        )
+        feats = compute_features(pd.DataFrame(rows), fixtures)
+        new = feats[feats["season"] == "2026-27"].iloc[0]
+        # 34 starts in 36 => ~0.94, not the 0.5 a trailing window would give.
+        assert new["roll4_started"] > 0.85
+        assert new["roll8_minutes"] > 80.0
 
 
 class TestNoLeakage:

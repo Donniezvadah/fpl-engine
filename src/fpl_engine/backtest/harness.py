@@ -139,8 +139,13 @@ def run_backtest(
     # form/ppg are per-GW baselines, not per-fixture sums; a DGW baseline is 2x form.
     scored = _gw_actual_frame(gw_pred, truth)
 
-    # Score only players the models expected to feature (mirrors real decisions).
-    eligible = scored[scored["p_play"] >= 0.25].copy()
+    # Accuracy is scored on players who actually appeared. This population must
+    # not depend on model output -- filtering by predicted p_play scores every
+    # variant on a different set of players, which silently invalidates any A/B
+    # comparison (the naive baselines shift too, which is how it shows up).
+    # Whether a player features at all is judged separately, by captain hit rate
+    # over the unfiltered frame and by the minutes model's own metrics.
+    eligible = scored[scored["minutes"] > 0].copy()
 
     ensemble_weight, summary = _fit_weight_and_score(eligible)
     per_gw = _per_gw_metrics(eligible)
