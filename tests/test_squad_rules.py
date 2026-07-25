@@ -203,8 +203,12 @@ class TestTransfers:
 
 
 class TestChips:
-    def test_all_available_initially(self):
-        assert set(available_chips(ChipState(), 1, RULES)) == {
+    def test_gw1_excludes_wildcard_and_freehit(self):
+        # Official windows: wildcard/freehit open in GW2; bboost/3xc from GW1.
+        assert set(available_chips(ChipState(), 1, RULES)) == {"bboost", "3xc"}
+
+    def test_all_available_from_gw2(self):
+        assert set(available_chips(ChipState(), 2, RULES)) == {
             "wildcard", "bboost", "3xc", "freehit",
         }
 
@@ -223,9 +227,20 @@ class TestChips:
         assert can_play_chip(state, "bboost", 10, RULES, chip_this_gw="3xc") is False
         assert can_play_chip(state, "bboost", 10, RULES) is True
 
-    def test_first_half_chip_expires(self):
-        # Unused first-half wildcard can't be "saved": in GW20+ you're using the
-        # second-half one, which is exactly what available_chips models.
+    def test_windows_are_independent(self):
+        # Spending the second-half wildcard leaves the first-half one untouched.
         state = ChipState(used=[("wildcard", 25)])
         assert "wildcard" not in available_chips(state, 30, RULES)
         assert "wildcard" in available_chips(state, 15, RULES)
+
+    def test_gw19_is_last_of_first_set(self):
+        state = ChipState()
+        assert "wildcard" in available_chips(state, 19, RULES)
+        # Using it in GW19 spends the first-half window only.
+        spent = ChipState(used=[("wildcard", 19)])
+        assert "wildcard" not in available_chips(spent, 19, RULES)
+        assert "wildcard" in available_chips(spent, 20, RULES)
+
+    def test_every_chip_has_two_windows(self):
+        for chip in RULES.chips.chips:
+            assert len(RULES.chips.windows_for(chip)) == 2

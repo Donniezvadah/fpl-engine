@@ -45,23 +45,33 @@ def sync_team() -> None:
 
 @app.command()
 def backtest(
-    season: str = typer.Option("2025-26", help="Season to replay."),
+    season: str = typer.Option(
+        None, help="Season to replay. Default: newest season with results."
+    ),
     train_seasons: list[str] = typer.Option(
-        [], "--train-season", help="Earlier seasons to include in training."
+        [],
+        "--train-season",
+        help="Earlier seasons to train on. Default: every earlier season in the DB.",
     ),
     start_gw: int = typer.Option(7),
     end_gw: int = typer.Option(38),
     refit_every: int = typer.Option(4, help="Refit models every N gameweeks."),
+    carryover: float = typer.Option(
+        None,
+        help="Prior-season carryover strength (0 disables). Default from features module.",
+    ),
 ) -> None:
     """Walk-forward backtest: the empirical gate for the models."""
     from .backtest.harness import run_backtest
+    from .models.features import CARRYOVER_PSEUDOCOUNT
 
     result = run_backtest(
         season=season,
-        train_seasons=list(train_seasons),
+        train_seasons=list(train_seasons) or None,
         start_gw=start_gw,
         end_gw=end_gw,
         refit_every=refit_every,
+        carryover=CARRYOVER_PSEUDOCOUNT if carryover is None else carryover,
     )
     result.print_report()
 
@@ -70,7 +80,11 @@ def backtest(
 def recommend(
     horizon: int = typer.Option(6, help="Gameweeks to plan ahead."),
     sims: int = typer.Option(10_000, help="Monte Carlo simulations."),
-    train_seasons: list[str] = typer.Option([], "--train-season"),
+    train_seasons: list[str] = typer.Option(
+        [],
+        "--train-season",
+        help="Seasons to train on. Default: every earlier season in the DB.",
+    ),
     as_of_gw: int = typer.Option(
         None, help="Replay a past deadline (models see only earlier GWs)."
     ),
@@ -82,7 +96,7 @@ def recommend(
     report = build_weekly_report(
         horizon=horizon,
         n_sims=sims,
-        train_seasons=list(train_seasons),
+        train_seasons=list(train_seasons) or None,
         as_of_gw=as_of_gw,
     )
     print_report(report)

@@ -77,13 +77,43 @@ class TransferRules:
 
 
 @dataclass(frozen=True)
+class ChipWindow:
+    """One playable window for one chip, inclusive of both endpoints."""
+
+    chip: str
+    start_event: int
+    stop_event: int
+
+    def contains(self, gw: int) -> bool:
+        return self.start_event <= gw <= self.stop_event
+
+
+# Mirrors the `chips` array of the official bootstrap-static endpoint. Note that
+# wildcard and free hit only open in GW2 — neither can be played in GW1, since
+# the opening squad is already unlimited-transfer.
+_TWO_SET_WINDOWS: tuple[ChipWindow, ...] = (
+    ChipWindow("wildcard", 2, 19),
+    ChipWindow("wildcard", 20, 38),
+    ChipWindow("freehit", 2, 19),
+    ChipWindow("freehit", 20, 38),
+    ChipWindow("bboost", 1, 19),
+    ChipWindow("bboost", 20, 38),
+    ChipWindow("3xc", 1, 19),
+    ChipWindow("3xc", 20, 38),
+)
+
+
+@dataclass(frozen=True)
 class ChipRules:
-    """Chip availability. 2025-26 introduced two full sets of chips:
-    one set usable in GW1-19, a second set in GW20-38. Only one chip per GW."""
+    """Chip availability. Since 2025-26 there are two full sets of chips: one
+    usable in the first half of the season, a second in the second half. Each
+    window may be used once, and only one chip may be active per gameweek."""
 
     chips: tuple[str, ...] = ("wildcard", "bboost", "3xc", "freehit")
-    two_sets: bool = True
-    first_half_last_gw: int = 19  # first-set chips expire after this GW
+    windows: tuple[ChipWindow, ...] = _TWO_SET_WINDOWS
+
+    def windows_for(self, chip: str) -> tuple[ChipWindow, ...]:
+        return tuple(w for w in self.windows if w.chip == chip)
 
 
 @dataclass(frozen=True)

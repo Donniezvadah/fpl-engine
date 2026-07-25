@@ -19,7 +19,12 @@ from sqlalchemy import select
 from ..config import settings
 from ..db.models import Fixture, MyTeamPick, MyTeamState
 from ..db.session import get_engine
-from ..models.features import build_feature_frame, load_fixtures, load_teams
+from ..models.features import (
+    build_feature_frame,
+    load_fixtures,
+    load_teams,
+    training_seasons_for,
+)
 from ..models.predictor import PointsPredictor, availability_for_rows
 from ..models.prices import PriceModel
 from ..models.upcoming import build_prediction_rows, dedupe_to_gw_level
@@ -113,7 +118,9 @@ def build_weekly_report(
     gw = as_of_gw if as_of_gw is not None else next_gameweek(season)
     gws = [g for g in range(gw, min(gw + horizon, rules.total_gameweeks + 1))]
 
-    seasons = [*(train_seasons or []), season]
+    if train_seasons is None:
+        train_seasons = training_seasons_for(season)
+    seasons = [*train_seasons, season]
     rows, players = build_prediction_rows(seasons, season, gws, cutoff_gw=as_of_gw)
     availability = availability_for_rows(rows, players)
 

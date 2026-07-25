@@ -20,7 +20,14 @@ from rich.console import Console
 from rich.table import Table
 from scipy.stats import spearmanr
 
-from ..models.features import build_feature_frame, load_fixtures, load_teams
+from ..models.features import (
+    CARRYOVER_PSEUDOCOUNT,
+    build_feature_frame,
+    latest_backtestable_season,
+    load_fixtures,
+    load_teams,
+    training_seasons_for,
+)
 from ..models.predictor import PointsPredictor
 from ..rules.constants import rules_for
 
@@ -69,17 +76,20 @@ def _gw_actual_frame(pred: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
 
 
 def run_backtest(
-    season: str = "2025-26",
+    season: str | None = None,
     train_seasons: list[str] | None = None,
     start_gw: int = 7,
     end_gw: int = 38,
     refit_every: int = 4,
+    carryover: float = CARRYOVER_PSEUDOCOUNT,
 ) -> BacktestResult:
-    train_seasons = train_seasons or []
+    season = season or latest_backtestable_season()
+    if train_seasons is None:
+        train_seasons = training_seasons_for(season)
     all_seasons = [*train_seasons, season]
     rules = rules_for(season)
 
-    df = build_feature_frame(all_seasons)
+    df = build_feature_frame(all_seasons, carryover_pseudocount=carryover)
     fixtures = load_fixtures(all_seasons)
     teams = load_teams(all_seasons)
 
