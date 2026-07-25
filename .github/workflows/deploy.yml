@@ -77,7 +77,8 @@ jobs:
 
       - name: Generate site data
         env:
-          FPL_TEAM_ID: ${{ vars.FPL_TEAM_ID }}
+          # Falls back to 0 (draft mode) when the variable is not configured.
+          FPL_TEAM_ID: ${{ vars.FPL_TEAM_ID || 0 }}
         run: uv run fpl export --out web/public/data --horizon 6 --sims 10000
 
       - uses: actions/setup-node@v4

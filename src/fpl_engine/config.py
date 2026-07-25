@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +47,21 @@ class Settings(BaseSettings):
 
     request_timeout_s: float = 30.0
     requests_per_second: float = 4.0
+
+    @field_validator("team_id", mode="before")
+    @classmethod
+    def _blank_team_id_means_unlinked(cls, value):
+        """Treat an empty or whitespace value as "no team linked".
+
+        `FPL_TEAM_ID=` in a .env, or an unset CI variable expanding to "", would
+        otherwise fail integer parsing and take the whole engine down rather than
+        falling back to draft mode.
+        """
+        if value is None:
+            return 0
+        if isinstance(value, str) and not value.strip():
+            return 0
+        return value
 
     @property
     def db_path(self) -> Path:
