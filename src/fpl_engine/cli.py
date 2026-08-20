@@ -121,6 +121,113 @@ def recommend(
 
 
 @app.command()
+def evaluate(
+    players: list[str] = typer.Argument(
+        None,
+        help='Your 15 players, e.g. Haaland "Raya (ARS)" 411. Club hints break ties.',
+    ),
+    file: str = typer.Option(
+        None, "--file", "-f", help="Read player names from a file, one per line."
+    ),
+    horizon: int = typer.Option(
+        1, help="Gameweeks to score over (1 = the next one alone)."
+    ),
+    bank: int = typer.Option(0, help="Money left over, in tenths (5 == £0.5m)."),
+) -> None:
+    """Score a squad you already own against the model."""
+    from pathlib import Path
+
+    from rich.table import Table
+
+    from .recommend.evaluate import build_pool, evaluate_squad, resolve_players
+    from .recommend.weekly import build_weekly_report
+    from .models.features import load_players
+    from .rules.constants import Position, rules_for
+
+    names = list(players or [])
+    if file:
+        names += [
+            line.strip()
+            for line in Path(file).read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+    if not names:
+        raise typer.BadParameter("give 15 player names, or --file with one per line")
+
+    console.print(f"[dim]fitting models over a {horizon}-gameweek horizon…[/dim]")
+    report = build_weekly_report(horizon=max(horizon, 2), n_sims=10_000)
+    pool = build_pool(report, load_players(report.season), horizon=horizon)
+
+    resolutions = resolve_players(names, pool)
+    unresolved = [r for r in resolutions if not r.ok]
+    if unresolved:
+        console.print("[red]Could not identify these names:[/red]")
+        for r in unresolved:
+            hint = (
+                "  candidates: " + "; ".join(r.candidates)
+                if r.candidates
+                else "  no match found"
+            )
+            console.print(f"  [bold]{r.query}[/bold]\n{hint}")
+        raise typer.Exit(1)
+
+    ids = [r.player_id for r in resolutions if r.player_id is not None]
+    rules = rules_for(report.season)
+    ev = evaluate_squad(ids, pool, rules, bank=bank, horizon_gws=report.horizon_gws[:horizon])
+
+    span = (
+        f"GW{report.next_gw}"
+        if horizon == 1
+        else f"GW{report.horizon_gws[0]}–GW{report.horizon_gws[horizon - 1]}"
+    )
+    console.print(
+        f"\n[bold]Your squad — {span}[/bold]  ·  cost £{ev.cost / 10:.1f}m"
+    )
+    if ev.legality:
+        console.print("[red]Not a legal squad:[/red] " + "; ".join(ev.legality))
+
+    t = Table()
+    for c in ("role", "player", "club", "pos", "price", "xP"):
+        t.add_column(c, justify="right" if c in ("price", "xP") else "left")
+    for r in ev.squad.itertuples():
+        t.add_row(
+            r.role,
+            r.web_name,
+            r.club_short,
+            Position(int(r.position)).name,
+            f"£{int(r.now_price) / 10:.1f}m",
+            f"{r.xp:.2f}",
+        )
+    console.print(t)
+
+    console.print(
+        f"starting XI: [bold]{ev.xi_xp:.1f}[/bold] xP  ·  captain "
+        f"[bold]{ev.captain_name}[/bold] (doubled) → total "
+        f"[bold]{ev.total_xp:.1f}[/bold] xP  ·  bench {ev.bench_xp:.1f}"
+    )
+    if ev.optimal_xp == ev.optimal_xp:  # not NaN
+        gap = ev.optimal_xp - ev.total_xp
+        console.print(
+            f"model's best squad at the same price: {ev.optimal_xp:.1f} xP "
+            f"([{'red' if gap > 0 else 'green'}]{gap:+.1f}[/])"
+        )
+
+    if not ev.upgrades.empty:
+        u = Table(title="Upgrades worth considering (same position, affordable)")
+        for c in ("out", "in", "club", "spend", "gain xP"):
+            u.add_column(c, justify="right" if c in ("spend", "gain xP") else "left")
+        for r in ev.upgrades.itertuples():
+            u.add_row(
+                f"{r.out_name} (£{r.out_price / 10:.1f}m)",
+                f"{r.in_name} (£{r.in_price / 10:.1f}m)",
+                r.in_club,
+                f"£{r.spend / 10:+.1f}m",
+                f"{r.gain:+.2f}",
+            )
+        console.print(u)
+
+
+@app.command()
 def export(
     out: str = typer.Option(
         "web/public/data", help="Directory to write the static site's data.json into."
