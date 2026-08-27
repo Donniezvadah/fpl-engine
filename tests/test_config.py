@@ -97,3 +97,39 @@ class TestFreeTransferDerivation:
         # still two after, plus the one earned for the following week.
         state = self._state([(1, 0, None), (2, 0, None), (3, 11, "wildcard")])
         assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 3
+
+
+class TestSellPriceEstimation:
+    """The public picks endpoint omits purchase and selling price, so they are
+    reconstructed from the price a player was worth when he entered the squad.
+    Defaulting them to zero told the optimiser selling raised no money, and it
+    could never afford a transfer."""
+
+    def _frames(self, first_gw=1, bought=50, now=55):
+        import pandas as pd
+
+        picks = pd.DataFrame([{"player_id": 7, "event": first_gw}])
+        squad_rows = pd.DataFrame([{"player_id": 7}])
+        return picks, squad_rows, bought, now
+
+    def test_profit_is_shared_with_the_game(self, monkeypatch):
+        from fpl_engine.rules import rules_for
+        from fpl_engine.rules.transfers import sell_price
+
+        rules = rules_for("2026-27")
+        # Bought at 5.0, now 5.5: keep half the 0.5 profit, rounded down per 0.1.
+        assert sell_price(50, 55, rules.transfers) == 52
+
+    def test_a_price_fall_is_absorbed_in_full(self):
+        from fpl_engine.rules import rules_for
+        from fpl_engine.rules.transfers import sell_price
+
+        rules = rules_for("2026-27")
+        assert sell_price(55, 50, rules.transfers) == 50
+
+    def test_unchanged_price_sells_for_what_it_cost(self):
+        from fpl_engine.rules import rules_for
+        from fpl_engine.rules.transfers import sell_price
+
+        rules = rules_for("2026-27")
+        assert sell_price(55, 55, rules.transfers) == 55

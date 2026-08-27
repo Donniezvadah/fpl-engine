@@ -17,7 +17,7 @@ import pandas as pd
 from sqlalchemy import select
 
 from ..config import settings
-from ..db.models import Fixture, MyTeamPick, MyTeamState
+from ..db.models import Fixture, MyTeamPick, MyTeamState, Player, PlayerGameweek
 from ..db.session import get_engine
 from ..models.features import (
     build_feature_frame,
@@ -33,7 +33,7 @@ from ..optim.planner import TransferPlan, TransferPlanner
 from ..optim.squad import OptimizedSquad, SquadOptimizer
 from ..rules.chips import ChipState, available_chips
 from ..rules.constants import rules_for
-from ..rules.transfers import next_free_transfers
+from ..rules.transfers import next_free_transfers, sell_price
 from ..sim.monte_carlo import simulate_gameweek
 
 DEFAULT_HORIZON = 6
@@ -102,14 +102,57 @@ def load_my_state(season: str, up_to_gw: int) -> tuple[dict[int, int], int, int,
         raise RuntimeError("no synced team data — run `fpl sync-team` (and set FPL_TEAM_ID)")
     last_gw = int(picks["event"].max())
     squad_rows = picks[picks["event"] == last_gw]
-    squad = {
-        int(r["player_id"]): int(r["selling_price"] or r["purchase_price"] or 0)
-        for _, r in squad_rows.iterrows()
-    }
+    squad = estimate_sell_prices(season, picks, squad_rows, rules_for(season))
     st = state[state["event"] == state["event"].max()].iloc[0]
     chips = ChipState(used=[tuple(c) for c in json.loads(st["chips_used"])])
     free_transfers = free_transfers_for_next_gw(state, rules_for(season))
     return squad, int(st["bank"]), free_transfers, chips, int(st["team_value"])
+
+
+def estimate_sell_prices(
+    season: str, picks: pd.DataFrame, squad_rows: pd.DataFrame, rules
+) -> dict[int, int]:
+    """Sell price for each player in the squad, in tenths.
+
+    The public picks endpoint omits purchase and selling price -- they are only
+    exposed on the authenticated my-team endpoint -- and defaulting them to zero
+    told the optimiser that selling raised no money, so it could never afford a
+    transfer and always recommended standing pat.
+
+    Purchase price is therefore reconstructed as the player's market price in the
+    first gameweek he appears in the squad, and the official sell-on rule (keep
+    half the profit, rounded down per 0.1m) applied against his price now. This
+    is exact for a player bought at a deadline and held, and can only err by a
+    tenth or two after several price rises.
+    """
+    engine = get_engine()
+    current = pd.read_sql(
+        select(Player.player_id, Player.now_price).where(Player.season == season), engine
+    ).set_index("player_id")["now_price"]
+
+    first_gw = picks.groupby("player_id")["event"].min()
+    historic = pd.read_sql(
+        select(PlayerGameweek.player_id, PlayerGameweek.event, PlayerGameweek.value)
+        .where(PlayerGameweek.season == season),
+        engine,
+    )
+    # A player can have several fixtures in a gameweek; the price is the same.
+    price_at = (
+        historic.groupby(["player_id", "event"])["value"].max()
+        if not historic.empty
+        else pd.Series(dtype=float)
+    )
+
+    squad: dict[int, int] = {}
+    for pid in squad_rows["player_id"].astype(int):
+        now = int(current.get(pid, 0))
+        bought = None
+        gw = int(first_gw.get(pid, 0))
+        if len(price_at):
+            bought = price_at.get((pid, gw))
+        bought = int(bought) if bought and bought > 0 else now
+        squad[pid] = sell_price(bought, now, rules.transfers)
+    return squad
 
 
 def free_transfers_for_next_gw(state: pd.DataFrame, rules) -> int:
