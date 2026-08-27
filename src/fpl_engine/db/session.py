@@ -35,6 +35,7 @@ def get_engine(db_path: Path | None = None):
             cursor.close()
 
         Base.metadata.create_all(_engine)
+        _heal_cached_schema(_engine)
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     return _engine
 
@@ -52,3 +53,33 @@ def session_scope(db_path: Path | None = None) -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+# Tables that are a pure cache of the FPL API and can be rebuilt in seconds by
+# re-syncing. Dropping one costs nothing; leaving it stale breaks every query
+# against it.
+_REBUILDABLE = ("my_team_state", "my_team_picks")
+
+
+def _heal_cached_schema(engine) -> None:
+    """Recreate cache tables whose columns no longer match the model.
+
+    `create_all` only creates missing tables, never alters existing ones, so a
+    database written by an older version keeps its old columns and every query
+    against the renamed one fails. That is exactly what a cached CI database did
+    after `free_transfers` became `event_transfers`. Only tables that can be
+    refetched are touched; ingested match history is never dropped.
+    """
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names())
+    for name in _REBUILDABLE:
+        table = Base.metadata.tables.get(name)
+        if table is None or name not in existing:
+            continue
+        on_disk = {c["name"] for c in inspector.get_columns(name)}
+        expected = {c.name for c in table.columns}
+        if on_disk != expected:
+            table.drop(engine, checkfirst=True)
+            table.create(engine)
