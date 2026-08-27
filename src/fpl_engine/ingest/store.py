@@ -175,7 +175,7 @@ def upsert_my_team(
             event=gw,
             bank=entry_history.get("bank", 0),
             team_value=entry_history.get("value", 0),
-            free_transfers=entry_history.get("event_transfers", 1),
+            event_transfers=entry_history.get("event_transfers", 0),
             chips_used=json.dumps(chips_used),
             active_chip=picks_payload.get("active_chip"),
             overall_points=entry_history.get("total_points", 0),

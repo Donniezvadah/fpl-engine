@@ -98,15 +98,33 @@ def training_seasons_for(target_season: str) -> list[str]:
     return [s for s in available_seasons() if s < target_season]
 
 
+# A season needs at least this many completed gameweeks before replaying it says
+# anything. Without the floor, the default silently switched to the new season the
+# moment its opening gameweek finished, and reported metrics off a single round.
+MIN_BACKTEST_GWS = 20
+
+
 def latest_backtestable_season() -> str:
-    """Newest season that has finished matches — the right default to replay."""
+    """Newest season with enough completed gameweeks to replay meaningfully."""
     engine = get_engine()
     df = pd.read_sql(
-        select(Fixture.season).where(Fixture.finished.is_(True)).distinct(), engine
+        select(Fixture.season, Fixture.event)
+        .where(Fixture.finished.is_(True), Fixture.event.is_not(None))
+        .distinct(),
+        engine,
     )
     if df.empty:
         raise RuntimeError("no finished fixtures in the database; run `fpl update` first")
-    return sorted(df["season"].tolist())[-1]
+    completed = df.groupby("season")["event"].nunique().sort_index()
+    usable = completed[completed >= MIN_BACKTEST_GWS]
+    if usable.empty:
+        raise RuntimeError(
+            "no season has at least "
+            f"{MIN_BACKTEST_GWS} completed gameweeks to backtest; "
+            f"longest is {completed.idxmax()} with {completed.max()}. "
+            "Load an earlier season with `fpl backfill`."
+        )
+    return str(usable.index[-1])
 
 
 def load_player_gameweeks(seasons: list[str]) -> pd.DataFrame:
@@ -205,7 +223,9 @@ def _blended_rolling_mean(
     # carrying nothing over, so this can only help where it is switched on.
     ramp = ((EARLY_SEASON_GWS - (df["event"] - 1)) / EARLY_SEASON_GWS).clip(0.0, 1.0)
     w_carry = w_carry * ramp
-    return (1.0 - w_carry) * within + w_carry * carried
+    # No prior season to carry: use this season's form alone.
+    w_carry = w_carry.where(carried.notna(), 0.0)
+    return (1.0 - w_carry) * within + w_carry * carried.fillna(0.0)
 
 
 def _prior_season_mean(df: pd.DataFrame, col: str, min_matches: int = 5) -> pd.Series:
@@ -220,7 +240,10 @@ def _prior_season_mean(df: pd.DataFrame, col: str, min_matches: int = 5) -> pd.S
     mean = cum["sum"] / counts.where(counts > 0)
     mean = mean.where(counts >= min_matches)
     mapped = pd.MultiIndex.from_arrays([df[PLAYER_KEY], df[SEASON_KEY]]).map(mean)
-    return pd.Series(mapped, index=df.index, dtype="float64").fillna(0.0)
+    # Left as NaN rather than 0 where a player has no usable prior season: the
+    # caller must then lean entirely on this season, because blending toward zero
+    # would read a new signing's first start as a benchwarming appearance.
+    return pd.Series(mapped, index=df.index, dtype="float64")
 
 
 def _prior_season_rate(df: pd.DataFrame, stat: str, league_prior: float) -> pd.Series:
@@ -388,4 +411,27 @@ def compute_features(
     df = df.drop(columns=["team_h_difficulty", "team_a_difficulty"])
 
     df["was_home"] = df["was_home"].astype(int)
+
+    # Placeholder rows for not-yet-played fixtures carry zero minutes, and a
+    # rolling mean counts them, so each future gameweek looked worse than the
+    # last -- Haaland's trailing minutes fell 77 -> 0 across a six-gameweek
+    # horizon and the planner concluded nobody was worth buying. Availability
+    # form is therefore frozen at what is known now: the earliest placeholder
+    # row's window ends on the last real match, so its values are the correct
+    # snapshot and every later placeholder reuses them. Per-90 rates need no such
+    # treatment -- a zero-minute row adds nothing to either side of the ratio.
+    # Fixture context (venue, opponent, difficulty) still varies per gameweek.
+    if "synthetic" in df.columns:
+        future = df["synthetic"].fillna(False).astype(bool)
+        if future.any():
+            form_cols = [
+                "last1_minutes",
+                f"roll{SHORT_WIN}_minutes",
+                f"roll{LONG_WIN}_minutes",
+                f"roll{SHORT_WIN}_started",
+                f"roll{LONG_WIN}_played60",
+            ]
+            df.loc[future, form_cols] = (
+                df[future].groupby(PLAYER_KEY)[form_cols].transform("first")
+            )
     return df

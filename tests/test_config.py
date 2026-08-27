@@ -42,3 +42,58 @@ class TestTeamId:
         monkeypatch.setenv("FPL_TEAM_ID", "not-a-number")
         with pytest.raises(Exception):
             Settings()
+
+
+class TestFreeTransferDerivation:
+    """The API never publishes free transfers, so they are replayed from the
+    official banking rule over the transfers actually made."""
+
+    def _state(self, rows):
+        import pandas as pd
+
+        return pd.DataFrame(
+            [{"event": e, "event_transfers": t, "active_chip": c} for e, t, c in rows]
+        )
+
+    def test_one_after_an_untouched_opening_gameweek(self):
+        from fpl_engine.recommend.weekly import free_transfers_for_next_gw
+        from fpl_engine.rules import rules_for
+
+        # The opening squad is built with unlimited transfers, so the first free
+        # transfer is only earned after GW1.
+        state = self._state([(1, 0, None)])
+        assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 1
+
+    def test_unused_transfers_accumulate_and_cap(self):
+        from fpl_engine.recommend.weekly import free_transfers_for_next_gw
+        from fpl_engine.rules import rules_for
+
+        rules = rules_for("2026-27")
+        state = self._state([(gw, 0, None) for gw in range(1, 4)])
+        assert free_transfers_for_next_gw(state, rules) == 3
+        state = self._state([(gw, 0, None) for gw in range(1, 12)])
+        assert free_transfers_for_next_gw(state, rules) == rules.transfers.max_banked_free_transfers
+
+    def test_spending_transfers_reduces_the_bank(self):
+        from fpl_engine.recommend.weekly import free_transfers_for_next_gw
+        from fpl_engine.rules import rules_for
+
+        # Bank two, spend two, and you are back to one the following week.
+        state = self._state([(1, 0, None), (2, 0, None), (3, 2, None)])
+        assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 1
+
+    def test_hits_never_push_the_bank_negative(self):
+        from fpl_engine.recommend.weekly import free_transfers_for_next_gw
+        from fpl_engine.rules import rules_for
+
+        state = self._state([(1, 0, None), (2, 6, None)])
+        assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 1
+
+    def test_chip_transfers_do_not_consume_the_bank(self):
+        from fpl_engine.recommend.weekly import free_transfers_for_next_gw
+        from fpl_engine.rules import rules_for
+
+        # A wildcard rebuild leaves the bank untouched: two banked going in,
+        # still two after, plus the one earned for the following week.
+        state = self._state([(1, 0, None), (2, 0, None), (3, 11, "wildcard")])
+        assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 3

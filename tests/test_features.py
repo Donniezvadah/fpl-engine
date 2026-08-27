@@ -151,3 +151,39 @@ class TestNoLeakage:
         # below what including its own 2.5 xG would produce.
         assert haul["xg90"] < 0.2
         assert first["roll8_minutes"] == 0.0  # nothing before the first match
+
+
+class TestFutureRowsDoNotDegrade:
+    """Placeholder rows for unplayed fixtures must not feed their own zeros back
+    into the rolling windows — that made every later gameweek in a plan look
+    worse than the one before it."""
+
+    def build(self, n_future: int = 6) -> pd.DataFrame:
+        rows = [_pgw("2026-27", 5, 900, 1, 1, minutes=90, started=1)]
+        rows += [
+            {**_pgw("2026-27", 5, 900, ev, 100 + ev, minutes=0, started=0), "synthetic": True}
+            for ev in range(2, 2 + n_future)
+        ]
+        rows[0]["synthetic"] = False
+        fixtures = _fixtures(
+            [("2026-27", 1, 1)] + [("2026-27", ev, 100 + ev) for ev in range(2, 2 + n_future)]
+        )
+        return compute_features(pd.DataFrame(rows), fixtures)
+
+    def test_availability_form_is_flat_across_the_horizon(self):
+        feats = self.build()
+        future = feats[feats["synthetic"].fillna(False)].sort_values("event")
+        for col in ("roll4_minutes", "roll8_minutes", "roll4_started", "last1_minutes"):
+            assert future[col].nunique() == 1, f"{col} drifts across the horizon"
+
+    def test_a_regular_starter_still_reads_as_one_in_the_last_gameweek(self):
+        feats = self.build()
+        last = feats[feats["synthetic"].fillna(False)].sort_values("event").iloc[-1]
+        assert last["roll4_minutes"] > 50.0
+        assert last["roll4_started"] > 0.5
+
+    def test_real_history_is_untouched(self):
+        feats = self.build()
+        real = feats[~feats["synthetic"].fillna(False)]
+        # The one real row has nothing before it, so its window is still empty.
+        assert real["roll4_minutes"].iloc[0] == 0.0

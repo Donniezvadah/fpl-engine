@@ -154,7 +154,10 @@ class MyTeamState(Base):
     event: Mapped[int] = mapped_column(Integer, primary_key=True)
     bank: Mapped[int] = mapped_column(Integer, default=0)  # tenths
     team_value: Mapped[int] = mapped_column(Integer, default=0)
-    free_transfers: Mapped[int] = mapped_column(Integer, default=1)
+    # Transfers MADE in this gameweek. Free transfers available are not
+    # exposed by the API at all and must be derived by rolling the official
+    # banking rule forward — see recommend.weekly.free_transfers_for_next_gw.
+    event_transfers: Mapped[int] = mapped_column(Integer, default=0)
     chips_used: Mapped[str] = mapped_column(Text, default="[]")  # JSON [(chip, gw)]
     active_chip: Mapped[str | None] = mapped_column(String(20), nullable=True)
     overall_points: Mapped[int] = mapped_column(Integer, default=0)

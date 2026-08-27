@@ -33,6 +33,7 @@ from ..optim.planner import TransferPlan, TransferPlanner
 from ..optim.squad import OptimizedSquad, SquadOptimizer
 from ..rules.chips import ChipState, available_chips
 from ..rules.constants import rules_for
+from ..rules.transfers import next_free_transfers
 from ..sim.monte_carlo import simulate_gameweek
 
 DEFAULT_HORIZON = 6
@@ -107,7 +108,27 @@ def load_my_state(season: str, up_to_gw: int) -> tuple[dict[int, int], int, int,
     }
     st = state[state["event"] == state["event"].max()].iloc[0]
     chips = ChipState(used=[tuple(c) for c in json.loads(st["chips_used"])])
-    return squad, int(st["bank"]), int(st["free_transfers"]), chips, int(st["team_value"])
+    free_transfers = free_transfers_for_next_gw(state, rules_for(season))
+    return squad, int(st["bank"]), free_transfers, chips, int(st["team_value"])
+
+
+def free_transfers_for_next_gw(state: pd.DataFrame, rules) -> int:
+    """Free transfers available for the gameweek after the last one in `state`.
+
+    The API publishes how many transfers you made, never how many free ones you
+    have, so this replays the official banking rule over the season so far. The
+    count starts at zero because the opening squad is built with unlimited
+    transfers; the first free transfer is earned after the GW1 deadline. Wildcard
+    and Free Hit gameweeks are skipped, since transfers made under those chips do
+    not consume the bank.
+    """
+    ft = 0
+    for _, row in state.sort_values("event").iterrows():
+        made = int(row["event_transfers"] or 0)
+        if row["active_chip"] in ("wildcard", "freehit"):
+            made = 0
+        ft = next_free_transfers(ft, made, rules.transfers)
+    return ft
 
 
 def build_weekly_report(
