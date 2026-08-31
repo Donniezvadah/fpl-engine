@@ -133,3 +133,61 @@ class TestSellPriceEstimation:
 
         rules = rules_for("2026-27")
         assert sell_price(55, 55, rules.transfers) == 55
+
+
+class TestNextGameweek:
+    """Once a deadline passes the squad is locked even though the matches are
+    still being played, so planning must skip a gameweek already under way."""
+
+    def _fixtures(self, rows):
+        import pandas as pd
+
+        return pd.DataFrame(
+            [
+                {
+                    "season": "2026-27",
+                    "fixture_id": 100 + i,
+                    "event": ev,
+                    "kickoff_time": pd.Timestamp(ko),
+                    "team_h": 1,
+                    "team_a": 2,
+                    "team_h_score": None,
+                    "team_a_score": None,
+                    "team_h_difficulty": 3,
+                    "team_a_difficulty": 3,
+                    "finished": fin,
+                }
+                for i, (ev, ko, fin) in enumerate(rows)
+            ]
+        )
+
+    def test_skips_a_gameweek_already_kicked_off(self, monkeypatch, tmp_path):
+        import pandas as pd
+
+        from fpl_engine.recommend import weekly
+
+        fx = self._fixtures(
+            [
+                (1, "2026-08-21T18:00:00", True),
+                (2, "2026-08-28T19:00:00", False),  # under way, deadline gone
+                (3, "2026-09-04T18:00:00", False),
+            ]
+        )
+        monkeypatch.setattr(weekly.pd, "read_sql", lambda *a, **k: fx)
+        now = pd.Timestamp("2026-08-31T19:30:00")
+        assert weekly.next_gameweek("2026-27", now=now) == 3
+
+    def test_returns_the_gameweek_still_open(self, monkeypatch):
+        import pandas as pd
+
+        from fpl_engine.recommend import weekly
+
+        fx = self._fixtures(
+            [
+                (1, "2026-08-21T18:00:00", True),
+                (2, "2026-08-28T19:00:00", False),
+            ]
+        )
+        monkeypatch.setattr(weekly.pd, "read_sql", lambda *a, **k: fx)
+        now = pd.Timestamp("2026-08-25T12:00:00")
+        assert weekly.next_gameweek("2026-27", now=now) == 2

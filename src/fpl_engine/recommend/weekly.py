@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import pandas as pd
 from sqlalchemy import select
@@ -72,15 +73,25 @@ class WeeklyReport:
     teams: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
-def next_gameweek(season: str) -> int:
+def next_gameweek(season: str, now: datetime | None = None) -> int:
+    """The next gameweek you can still act on.
+
+    Deliberately not "the first unfinished gameweek": once a deadline passes the
+    squad is locked even though the matches are still being played, so planning
+    against a gameweek in progress would recommend transfers that cannot be made.
+    A gameweek is still open only while none of its fixtures has kicked off.
+    """
     engine = get_engine()
-    fx = pd.read_sql(
-        select(Fixture).where(Fixture.season == season), engine
-    )
-    unfinished = fx[~fx["finished"] & fx["event"].notna()]
-    if unfinished.empty:
-        raise RuntimeError(f"season {season} has no unfinished fixtures — season over?")
-    return int(unfinished["event"].min())
+    fx = pd.read_sql(select(Fixture).where(Fixture.season == season), engine)
+    fx = fx[fx["event"].notna() & fx["kickoff_time"].notna()]
+    if fx.empty:
+        raise RuntimeError(f"season {season} has no scheduled fixtures — run `fpl update`")
+    now = now or datetime.utcnow()
+    first_kickoff = fx.groupby("event")["kickoff_time"].min()
+    open_gws = first_kickoff[first_kickoff > now]
+    if open_gws.empty:
+        raise RuntimeError(f"season {season} has no gameweeks left to plan — season over?")
+    return int(open_gws.index.min())
 
 
 def load_my_state(season: str, up_to_gw: int) -> tuple[dict[int, int], int, int, ChipState, int]:

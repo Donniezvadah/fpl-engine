@@ -21,8 +21,16 @@ from .dixon_coles import DixonColesModel, matches_frame
 from .minutes import MinutesModel, availability_from_flags
 from .points import compose_xp
 
-# Default blend; refit by the backtest (see backtest/ensemble_weights).
-DEFAULT_COMPOSED_WEIGHT = 0.5
+# Weight on the Poisson-composed model in the blend with the direct LightGBM one.
+# Fitted by the walk-forward backtest, which minimises MAE over 2025-26 and lands
+# on 0.80; it was previously hardcoded to 0.50 and the fitted value was computed
+# but never fed back, so live predictions systematically over-weighted the direct
+# model. That model extrapolates from a player's historical scoring rather than
+# his current rates, which inflated established names -- it had Haaland at 11.6
+# expected points against the composed model's 6.5, and the Monte Carlo simulator
+# (independently built on the same Poisson components) agreed with the latter.
+# Re-run `fpl backtest` after any model change and update this if the fit moves.
+DEFAULT_COMPOSED_WEIGHT = 0.80
 
 
 @dataclass
