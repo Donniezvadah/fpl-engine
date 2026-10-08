@@ -34,6 +34,10 @@ export interface Player {
   e_assists: number | null;
   xp_by_gw: Record<string, number | null>;
   fixtures_by_gw: Record<string, number>;
+  opp_by_gw: Record<string, string>;
+  status: string;
+  chance: number | null;
+  news: string;
 }
 
 export interface CaptainOption {
@@ -90,7 +94,63 @@ export interface PriceWatchRow {
   p_fall: number;
 }
 
+export interface TeamEntry {
+  id: number;
+  name: string;
+  position: number | null;
+  club_short: string;
+  price: number | null;
+  sell: number | null;
+  role: string; // captain | vice | XI | bench | out | in
+  order: number;
+  xp_next: number | null;
+  xp_horizon: number;
+}
+
+export interface WildcardMove {
+  out: TeamEntry;
+  in: TeamEntry;
+  delta_xp: number;
+}
+
+export interface WildcardPlan {
+  event: number;
+  gain: number;
+  detail: string;
+  squad: TeamEntry[];
+  moves: WildcardMove[];
+  cost: number;
+  budget: number;
+  follow_on: {
+    event: number;
+    transfers_in: string[];
+    transfers_out: string[];
+    hits: number;
+    captain: string;
+  }[];
+}
+
+export interface RankPoint {
+  event: number;
+  overall_points: number;
+  overall_rank: number | null;
+  event_transfers: number;
+  active_chip: string | null;
+}
+
+export interface MyTeamData {
+  bank: number;
+  free_transfers: number;
+  team_value: number;
+  chips_used: { chip: string; event: number }[];
+  chips_available: string[];
+  current: TeamEntry[];
+  wildcard: WildcardPlan | null;
+  history: RankPoint[];
+}
+
 export interface Dataset {
+  my_team: MyTeamData | null;
   meta: Meta;
   captains: CaptainOption[];
   chips: ChipEval[];

@@ -12,10 +12,12 @@ import {
 import { Badge, Card, StatTile, Table } from "@/components/ui";
 import { CaptainChart, HorizonChart } from "@/components/charts";
 import { PlayerExplorer } from "@/components/explorer";
+import { MyTeamView } from "@/components/my-team";
 
 export default function Dashboard() {
   const [data, setData] = useState<Dataset | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"team" | "overview" | null>(null);
 
   useEffect(() => {
     loadDataset()
@@ -44,10 +46,37 @@ export default function Dashboard() {
     );
   }
 
+  const view = tab ?? (data.my_team ? "team" : "overview");
+
   return (
     <main className="mx-auto max-w-6xl px-4 py-6 w-full">
       <Header data={data} />
-      <Content data={data} />
+      {data.my_team && (
+        <nav className="mt-4 flex gap-1 border-b border-border-token" aria-label="Views">
+          {(
+            [
+              ["team", "My Team"],
+              ["overview", "Overview & players"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              aria-current={view === key}
+              className={`px-3 py-2 text-sm -mb-px border-b-2 ${
+                view === key
+                  ? "border-foreground font-medium"
+                  : "border-transparent text-secondary hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      )}
+      <div className="mt-6">
+        {view === "team" ? <MyTeamView data={data} /> : <Content data={data} />}
+      </div>
       <footer className="text-xs text-muted mt-8 pb-4">
         Generated {new Date(data.meta.generated_at).toLocaleString()} ·{" "}
         {data.meta.player_count} players · expected points carry uncertainty and
@@ -74,7 +103,7 @@ function Content({ data }: { data: Dataset }) {
   const squadCost = data.squad?.cost ?? null;
 
   return (
-    <div className="mt-6 grid gap-4">
+    <div className="grid gap-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatTile label="Next deadline" value={`GW${data.meta.next_gw}`} />
         <StatTile

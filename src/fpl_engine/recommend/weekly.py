@@ -53,6 +53,21 @@ class CaptainOption:
 
 
 @dataclass
+class MyTeamInfo:
+    """Everything about the linked entry that the dashboard's My Team page shows."""
+
+    squad: dict[int, int]  # player_id -> sell price (tenths)
+    bank: int
+    free_transfers: int
+    team_value: int
+    chips_used: list[tuple[str, int]]
+    chips_available: list[str]
+    picks: pd.DataFrame  # last synced gameweek: player_id, pick_order, is_captain, ...
+    history: pd.DataFrame  # per-gameweek points / overall rank
+    wildcard: ChipEvaluation | None = None  # best wildcard evaluation, with its plan
+
+
+@dataclass
 class WeeklyReport:
     season: str
     next_gw: int
@@ -71,6 +86,11 @@ class WeeklyReport:
     horizon_xp: pd.DataFrame = field(default_factory=pd.DataFrame)
     horizon_gws: list[int] = field(default_factory=list)
     teams: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Linked-mode extras for the My Team page.
+    my_team: MyTeamInfo | None = None
+    # Availability flags (status / chance / news) and per-fixture labels.
+    flags: pd.DataFrame = field(default_factory=pd.DataFrame)
+    fixture_rows: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def next_gameweek(season: str, now: datetime | None = None) -> int:
@@ -244,6 +264,7 @@ def build_weekly_report(
     plan: TransferPlan | None = None
     draft: OptimizedSquad | None = None
     chips: list[ChipEvaluation] = []
+    my_team: MyTeamInfo | None = None
     mode = "draft"
     try:
         squad, bank, fts, chip_state, team_value = load_my_state(season, gw)
@@ -254,6 +275,10 @@ def build_weekly_report(
             rules, xp_matrix, gws, squad, bank, fts, team_value,
             available=available_chips(chip_state, gw, rules),
             base_plan=plan,
+        )
+        my_team = _my_team_info(
+            season, gw, squad, bank, fts, team_value, chip_state,
+            available_chips(chip_state, gw, rules), chips,
         )
     except RuntimeError:
         first = f"xp_{gws[0]}"
@@ -333,6 +358,43 @@ def build_weekly_report(
         horizon_xp=gw_xp,
         horizon_gws=gws,
         teams=teams[teams["season"] == season],
+        my_team=my_team,
+        flags=players[["player_id", "status", "chance_next_round", "news"]].copy(),
+        fixture_rows=pred[["player_id", "event", "opponent_team", "was_home"]].copy(),
+    )
+
+
+def _my_team_info(
+    season: str,
+    gw: int,
+    squad: dict[int, int],
+    bank: int,
+    fts: int,
+    team_value: int,
+    chip_state,
+    available: list[str],
+    chips: list[ChipEvaluation],
+) -> MyTeamInfo:
+    engine = get_engine()
+    picks = pd.read_sql(
+        select(MyTeamPick).where(MyTeamPick.season == season, MyTeamPick.event < gw), engine
+    )
+    picks = picks[picks["event"] == picks["event"].max()]
+    state = pd.read_sql(
+        select(MyTeamState).where(MyTeamState.season == season, MyTeamState.event < gw),
+        engine,
+    ).sort_values("event")
+    wildcards = [c for c in chips if c.chip == "wildcard" and c.plan is not None]
+    return MyTeamInfo(
+        squad=squad,
+        bank=bank,
+        free_transfers=fts,
+        team_value=team_value,
+        chips_used=[tuple(c) for c in chip_state.used],
+        chips_available=available,
+        picks=picks,
+        history=state[["event", "overall_points", "overall_rank", "event_transfers", "active_chip"]],
+        wildcard=max(wildcards, key=lambda c: c.gain_pts) if wildcards else None,
     )
 
 

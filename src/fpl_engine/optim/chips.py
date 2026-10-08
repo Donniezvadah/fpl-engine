@@ -34,6 +34,7 @@ class ChipEvaluation:
     event: int
     gain_pts: float
     detail: str
+    plan: TransferPlan | None = None  # the full re-solved plan (wildcard only)
 
 
 def evaluate_chips(
@@ -110,6 +111,7 @@ def evaluate_chips(
                 ChipEvaluation(
                     "wildcard", gw, wc.objective - base.objective,
                     f"full-rebuild plan objective {wc.objective:.1f} vs {base.objective:.1f}",
+                    plan=wc,
                 )
             )
 

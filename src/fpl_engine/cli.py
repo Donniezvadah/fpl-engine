@@ -248,6 +248,27 @@ def export(
 
 
 @app.command()
+def refresh(
+    out: str = typer.Option("web/public/data", help="Where the dashboard reads data.json."),
+    horizon: int = typer.Option(6, help="Gameweeks of expected points to publish."),
+    sims: int = typer.Option(10_000, help="Monte Carlo simulations."),
+) -> None:
+    """One step for the weekly routine: update data, sync your team, re-export the site."""
+    from pathlib import Path
+
+    from .ingest.pipeline import sync_my_team, update_current_season
+    from .recommend.export import export_site_data
+
+    console.print(update_current_season())
+    try:
+        res = sync_my_team()
+        console.print(f"synced {res['team_name']} — {res['gameweeks_synced']} gameweeks")
+    except Exception as exc:  # unlinked or pre-season: still export draft mode
+        console.print(f"[yellow]team sync skipped: {exc}[/yellow]")
+    console.print(export_site_data(Path(out), horizon=horizon, n_sims=sims))
+
+
+@app.command()
 def api(
     host: str = typer.Option("127.0.0.1"),
     port: int = typer.Option(8000),

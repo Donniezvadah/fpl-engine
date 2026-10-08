@@ -66,6 +66,24 @@ To point the published site at your own squad instead of a from-scratch draft,
 set an `FPL_TEAM_ID` repository variable — the workflow picks it up and switches
 to linked mode once a deadline has passed.
 
+## My Team
+
+With `FPL_TEAM_ID` set, the dashboard opens on a **My Team** tab:
+
+- a pitch view of your synced squad (formation, captain, bench, injury flags, next opponent);
+- the Wildcard rebuild the engine recommends, as a second pitch plus an out → in table;
+- transfer suggestions that are scored on the whole team (best XI + captain), not player
+  by player, so bench-only upgrades don't look like big wins;
+- an editor: tap a player to swap him, make him captain, or press **Use this as my team**
+  on the Wildcard squad. Budget, 3-per-club and position rules are checked as you go.
+  Edits are saved in your browser only and are never uploaded.
+
+Refresh everything in one step (data, team sync, site data):
+
+```bash
+uv run fpl refresh
+```
+
 ## Design principles
 
 1. **Never guess, always compute** — every recommendation traces to model outputs.

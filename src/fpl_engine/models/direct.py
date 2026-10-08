@@ -14,13 +14,19 @@ import pandas as pd
 
 from .features import FEATURE_COLUMNS
 
+# Heavily regularised on purpose: weekly points are mostly noise, and the earlier
+# 63-leaf / 500-round setup overfit it. On the 2025-26 walk-forward backtest (run
+# as two halves, GW1-19 and GW20-38) this cut the direct model's MAE by about 0.03
+# to 0.04 and lifted its Spearman by about 0.01 in both halves; the ensemble's MAE
+# and RMSE improved or stayed flat in both.
 _LGB_PARAMS = {
     "objective": "regression",
     "metric": "l2",
-    "learning_rate": 0.05,
-    "num_leaves": 63,
-    "min_child_samples": 40,
-    "feature_fraction": 0.8,
+    "learning_rate": 0.03,
+    "num_leaves": 7,
+    "min_child_samples": 400,
+    "lambda_l2": 20.0,
+    "feature_fraction": 0.7,
     "bagging_fraction": 0.8,
     "bagging_freq": 1,
     "verbosity": -1,
@@ -34,7 +40,7 @@ class DirectPointsModel:
         self.bucket_edges: np.ndarray | None = None
         self.bucket_std: np.ndarray | None = None
 
-    def fit(self, df: pd.DataFrame, n_rounds: int = 500) -> "DirectPointsModel":
+    def fit(self, df: pd.DataFrame, n_rounds: int = 400) -> "DirectPointsModel":
         X = df[FEATURE_COLUMNS]
         y = df["total_points"].astype(float)
         self.model = lgb.train(_LGB_PARAMS, lgb.Dataset(X, label=y), num_boost_round=n_rounds)
