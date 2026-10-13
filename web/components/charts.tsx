@@ -4,6 +4,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ErrorBar,
   Line,
   LineChart,
@@ -12,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { CaptainOption, Player } from "@/lib/api";
+import { CaptainOption, Player, Review } from "@/lib/api";
 
 const css = (name: string, fallback: string) =>
   typeof window === "undefined"
@@ -135,6 +136,61 @@ export function HorizonChart({
           />
         ))}
       </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Points each alternative would have scored this week, as horizontal bars. */
+export function WhatIfChart({ items }: { items: { label: string; points: number }[] }) {
+  const ink = css("--text-secondary", "#52514e");
+  const grid = css("--border", "#e4e4e0");
+  const series = css("--series-1", "#2a78d6");
+  const muted = css("--text-muted", "#8a887f");
+  const actual = items[items.length - 1]?.points;
+  const data = items.map((i) => ({ ...i, label: i.label.replace(" (before hits)", "") }));
+  return (
+    <ResponsiveContainer width="100%" height={data.length * 42 + 40}>
+      <BarChart data={data} layout="vertical" margin={{ left: 8, right: 28 }}>
+        <CartesianGrid horizontal={false} stroke={grid} strokeDasharray="2 4" />
+        <XAxis type="number" tick={{ fill: ink, fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis
+          type="category"
+          dataKey="label"
+          width={190}
+          tick={{ fill: ink, fontSize: 11 }}
+          axisLine={false}
+          tickLine={false}
+        />
+        <Tooltip cursor={{ fill: "transparent" }} content={<ChartTooltip suffix=" pts" />} />
+        <Bar dataKey="points" barSize={14} radius={[0, 4, 4, 0]}>
+          {data.map((d, i) => (
+            <Cell key={i} fill={d.points === actual && i === data.length - 1 ? series : muted} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Predicted vs actual average points for five equal groups of players, rated low to high. */
+export function CalibrationChart({ bins }: { bins: Review["model"]["calibration"] }) {
+  const ink = css("--text-secondary", "#52514e");
+  const grid = css("--border", "#e4e4e0");
+  const data = bins.map((b) => ({
+    group: ["lowest", "low", "middle", "high", "highest"][Number(b.bin) - 1] ?? b.bin,
+    Predicted: b.xp,
+    Actual: b.actual,
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <BarChart data={data} margin={{ left: 0, right: 12, top: 8 }}>
+        <CartesianGrid stroke={grid} strokeDasharray="2 4" vertical={false} />
+        <XAxis dataKey="group" tick={{ fill: ink, fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fill: ink, fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
+        <Tooltip cursor={{ fill: "transparent" }} />
+        <Bar dataKey="Predicted" fill={css("--text-muted", "#8a887f")} barSize={16} radius={[4, 4, 0, 0]} />
+        <Bar dataKey="Actual" fill={css("--series-1", "#2a78d6")} barSize={16} radius={[4, 4, 0, 0]} />
+      </BarChart>
     </ResponsiveContainer>
   );
 }

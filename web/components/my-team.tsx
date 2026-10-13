@@ -73,7 +73,9 @@ function syncedState(data: Dataset): TeamState {
     slots: mt.current.map((e) => ({ id: e.id, value: e.sell ?? e.price ?? 0 })),
     bank: mt.bank,
     freeTransfers: mt.free_transfers,
-    captainId: mt.current.find((e) => e.role === "captain")?.id ?? null,
+    // Last week's armband is not this week's: leave the captain to the model until
+    // the user picks one.
+    captainId: null,
     syncedFrom: data.meta.generated_at,
     edited: false,
   };
@@ -184,20 +186,31 @@ function Linked({ data }: { data: Dataset }) {
     setQuery("");
   };
 
-  const applyWildcard = () => {
-    if (!wc) return;
+  // The squad the engine advises for this week: the Wildcard rebuild while that
+  // chip is still available and worth playing, otherwise the normal transfer plan.
+  const rec = mt.recommended;
+  const advised =
+    wcAvailable && wc
+      ? { wildcard: true, event: wc.event, squad: wc.squad, moves: wc.moves, hits: 0 }
+      : rec
+        ? { wildcard: false, event: rec.event, squad: rec.squad, moves: rec.moves, hits: rec.hits }
+        : null;
+
+  const applyAdvised = () => {
+    if (!advised) return;
     // Kept players stay at their sell value; new ones are bought at today's price.
+    const squad = advised.squad;
     const held = new Map(team.slots.map((s) => [s.id, s.value]));
-    const slots: Slot[] = wc.squad.map((e) => ({ id: e.id, value: held.get(e.id) ?? e.price ?? 0 }));
-    const sold = team.slots.filter((s) => !wc.squad.some((e) => e.id === s.id));
-    const bought = wc.squad.filter((e) => !held.has(e.id));
+    const slots: Slot[] = squad.map((e) => ({ id: e.id, value: held.get(e.id) ?? e.price ?? 0 }));
+    const sold = team.slots.filter((s) => !squad.some((e) => e.id === s.id));
+    const bought = squad.filter((e) => !held.has(e.id));
     mutate({
       slots,
       bank:
         team.bank +
         sold.reduce((t, s) => t + s.value, 0) -
         bought.reduce((t, e) => t + (e.price ?? 0), 0),
-      captainId: wc.squad.find((e) => e.role === "captain")?.id ?? null,
+      captainId: squad.find((e) => e.role === "captain")?.id ?? null,
     });
   };
 
@@ -213,7 +226,26 @@ function Linked({ data }: { data: Dataset }) {
         plan, changing {wc.moves.length} of your 15 players.
       </>,
     );
+  } else if (rec && rec.moves.length > 0) {
+    const n = rec.moves.length;
+    actions.push(
+      <>
+        <strong>
+          Make {n} transfer{n === 1 ? "" : "s"}:
+        </strong>{" "}
+        {rec.moves.map((m, i) => (
+          <span key={m.in.id}>
+            {i > 0 && "; "}
+            {m.out.name} → <strong>{m.in.name}</strong>
+          </span>
+        ))}
+        . {rec.hits ? `This costs a ${rec.hits * 4}-point hit.` : `Covered by your ${team.freeTransfers} free transfers, no hit.`}
+      </>,
+    );
+  } else {
+    actions.push(<>No transfer is worth making this week. Bank the free transfer.</>);
   }
+  const outIds = new Set((advised?.moves ?? []).map((m) => m.out.id));
   for (const id of ids) {
     const p = byId.get(id);
     const av = availability(p);
@@ -222,8 +254,8 @@ function Linked({ data }: { data: Dataset }) {
         <>
           <strong>{p.name}</strong> is {av === "out" ? "unavailable" : "a doubt"}
           {p.chance != null ? ` (${p.chance}% to play)` : ""}
-          {p.news ? ` — ${p.news}` : ""}.{" "}
-          {wcAvailable ? "The Wildcard team replaces him." : "Replace him before the deadline."}
+          {p.news ? `: ${p.news}` : ""}.{" "}
+          {outIds.has(id) ? "The suggested transfers replace him." : "Consider replacing him."}
         </>,
       );
   }
@@ -237,14 +269,32 @@ function Linked({ data }: { data: Dataset }) {
       </>,
     );
   }
-  if (!wcAvailable || !wc) {
-    for (const m of plan)
-      actions.push(
+  for (const chip of mt.chips_available) {
+    if (chip === "wildcard") continue;
+    const evals = data.chips.filter((c) => c.chip === chip);
+    const best = evals.reduce<(typeof evals)[number] | null>(
+      (b, c) => (!b || c.gain > b.gain ? c : b),
+      null,
+    );
+    const now = evals.find((c) => c.event === gw);
+    if (!best) continue;
+    actions.push(
+      best.event === gw && best.gain > 8 ? (
         <>
-          Transfer {m.step}: <strong>{m.out.name}</strong> → <strong>{m.in.name}</strong>{" "}
-          (+{fmtNum(m.delta, 1)} team xP over {n} GWs{m.hit ? `, before a −${m.hit} hit` : ", free"}).
-        </>,
-      );
+          <strong>Play your {CHIP_LABEL[chip]} this week</strong> (+{fmtNum(best.gain, 1)} xP).
+        </>
+      ) : best.event === gw ? (
+        <>
+          Keep your <strong>{CHIP_LABEL[chip]}</strong>: it adds only +{fmtNum(best.gain, 1)} xP
+          this week, so save it for a gameweek where it is worth far more.
+        </>
+      ) : (
+        <>
+          Hold your <strong>{CHIP_LABEL[chip]}</strong>: best window in this plan is GW{best.event}{" "}
+          (+{fmtNum(best.gain, 1)} xP){now ? `, this week is worth +${fmtNum(now.gain, 1)}` : ""}.
+        </>
+      ),
+    );
   }
 
   const candidates = useMemo(() => {
@@ -275,12 +325,14 @@ function Linked({ data }: { data: Dataset }) {
   }, [editing, byId, team.slots, team.bank, ids, data.players, gws, n, query]);
 
   const editingPlayer = editing != null ? byId.get(editing) : undefined;
-  const wcLineup = wc ? lineupOf(wc.squad) : null;
-  const wcTags: Record<number, string> = {};
-  if (wc) for (const m of wc.moves) wcTags[m.in.id] = "NEW";
+  const advLineup = advised ? lineupOf(advised.squad) : null;
+  const advTags: Record<number, string> = {};
+  if (advised) for (const m of advised.moves) advTags[m.in.id] = "NEW";
+  const advGain = advLineup ? pickLineup(advised!.squad.map((e) => e.id), byId, gw).xp - pickLineup(mt.current.map((e) => e.id), byId, gw).xp : 0;
+  const deadline = data.meta.deadline ? new Date(data.meta.deadline) : null;
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-1 gap-4">
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <StatTile
           label="Overall rank"
@@ -309,7 +361,17 @@ function Linked({ data }: { data: Dataset }) {
 
       <Card
         title={`What to do before the GW${gw} deadline`}
-        subtitle="generated from the models for your synced squad"
+        subtitle={
+          deadline
+            ? `deadline ${deadline.toLocaleString([], {
+                weekday: "short",
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })} · from the models, for your synced squad`
+            : "from the models, for your synced squad"
+        }
       >
         <ol className="grid gap-2 text-sm list-decimal pl-5">
           {actions.map((a, i) => (
@@ -334,7 +396,7 @@ function Linked({ data }: { data: Dataset }) {
         </div>
       )}
 
-      <div className="grid xl:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Card
           title="Your team"
           subtitle={`formation ${lineup.formation} · XI + captain ${fmtNum(lineup.xp, 1)} xP in GW${gw} · tap a player to swap or captain`}
@@ -361,29 +423,33 @@ function Linked({ data }: { data: Dataset }) {
           </div>
         </Card>
 
-        {wc && wcLineup ? (
+        {advised && advLineup ? (
           <Card
-            title={`Wildcard team (GW${wc.event})`}
-            subtitle={`+${fmtNum(wc.gain, 1)} xP vs your best normal plan · sell ${fmtPrice(
-              wc.moves.reduce((t, m) => t + (m.out.sell ?? m.out.price ?? 0), 0),
-            )}, buy ${fmtPrice(wc.moves.reduce((t, m) => t + (m.in.price ?? 0), 0))}`}
+            title={advised.wildcard ? `Wildcard team (GW${advised.event})` : `Recommended team for GW${advised.event}`}
+            subtitle={
+              advised.wildcard && wc
+                ? `+${fmtNum(wc.gain, 1)} xP vs your best normal plan · sell ${fmtPrice(
+                    wc.moves.reduce((t, m) => t + (m.out.sell ?? m.out.price ?? 0), 0),
+                  )}, buy ${fmtPrice(wc.moves.reduce((t, m) => t + (m.in.price ?? 0), 0))}`
+                : `${advised.moves.length} transfer${advised.moves.length === 1 ? "" : "s"}${
+                    advised.hits ? ` with a −${advised.hits * 4} hit` : ", no hit"
+                  } · ${advGain >= 0 ? "+" : ""}${fmtNum(advGain, 1)} xP in GW${advised.event} vs your current XI`
+            }
           >
-            <Pitch lineup={wcLineup} byId={byId} gw={wc.event} tags={wcTags} />
+            <Pitch lineup={advLineup} byId={byId} gw={advised.event} tags={advTags} />
             <div className="flex flex-wrap gap-3 mt-3 items-center">
               <button
                 className="rounded-lg bg-foreground text-background text-sm font-medium px-3 py-1.5"
-                onClick={applyWildcard}
+                onClick={applyAdvised}
               >
                 Use this as my team
               </button>
-              {!wcAvailable && <Badge tone="serious">Wildcard already used</Badge>}
+              {!wcAvailable && <Badge>Wildcard used in GW{mt.chips_used.find((c) => c.chip === "wildcard")?.event ?? "?"}</Badge>}
             </div>
           </Card>
         ) : (
-          <Card title="Wildcard team" subtitle="not available">
-            <p className="text-sm text-muted">
-              No Wildcard to play, so the transfer suggestions below are the way to improve.
-            </p>
+          <Card title="Recommended team" subtitle="not available">
+            <p className="text-sm text-muted">No plan was generated for this week.</p>
           </Card>
         )}
       </div>
@@ -439,14 +505,14 @@ function Linked({ data }: { data: Dataset }) {
         </Card>
       )}
 
-      {wc && (
+      {advised && advised.moves.length > 0 && (
         <Card
-          title="Wildcard transfers"
-          subtitle={`${wc.moves.length} players out, ${wc.moves.length} in — expected points are summed over the next ${gws.length} gameweeks; the gain that counts is the whole-team figure above`}
+          title={advised.wildcard ? "Wildcard transfers" : `Suggested transfers for GW${advised.event}`}
+          subtitle={`${advised.moves.length} out, ${advised.moves.length} in. Expected points are summed over the next ${gws.length} gameweeks; the whole-team gain shown above is what counts.`}
         >
           <Table
             head={["out", "", "in", "pos", "price", "next 3 fixtures", "xP out", "xP in"]}
-            rows={[...wc.moves]
+            rows={[...advised.moves]
               .sort((a, b) => b.in.xp_horizon - a.in.xp_horizon)
               .map((m) => [
               <span key="o" className="text-serious">
@@ -474,7 +540,7 @@ function Linked({ data }: { data: Dataset }) {
               </span>,
             ])}
           />
-          {wc.follow_on.some((f) => f.transfers_in.length > 0) && (
+          {advised.wildcard && wc && wc.follow_on.some((f) => f.transfers_in.length > 0) && (
             <div className="mt-4">
               <div className="text-xs font-medium text-secondary mb-1">
                 After the Wildcard, the planner expects
@@ -496,9 +562,29 @@ function Linked({ data }: { data: Dataset }) {
         </Card>
       )}
 
+      {data.plan && (
+        <Card
+          title="The coming gameweeks"
+          subtitle="the planner's route through the next six gameweeks: transfers, banked free transfers and captain"
+        >
+          <Table
+            head={["GW", "in", "out", "free transfers", "hit", "captain", "XI xP"]}
+            rows={data.plan.map((g) => [
+              String(g.event),
+              g.transfers_in.join(", ") || "—",
+              g.transfers_out.join(", ") || "—",
+              String(g.free_transfers),
+              g.hits ? `−${g.hits * 4}` : "none",
+              g.captain || "—",
+              fmtNum(g.xi_xp, 1),
+            ])}
+          />
+        </Card>
+      )}
+
       <Card
-        title="Transfer suggestions for your team"
-        subtitle="recomputed from the squad above — edit the team and these update"
+        title="Quick swaps for your team"
+        subtitle="one transfer at a time, paid for from your bank. The planner above also finds paired moves, where one sale funds another purchase. Edit the team and these update."
       >
         <div className="flex items-center gap-2 mb-3 text-xs text-secondary">
           Horizon

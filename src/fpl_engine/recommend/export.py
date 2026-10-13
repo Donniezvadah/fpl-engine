@@ -16,7 +16,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from sqlalchemy import select
+
+from ..config import settings
+from ..db.models import Player
+from ..db.session import get_engine
+from ..ingest.fpl_api import FplApiClient
 from ..rules.constants import Position
+from .review import build_review, load_snapshot, write_snapshot
 from .weekly import WeeklyReport, build_weekly_report
 
 
@@ -41,6 +48,32 @@ def _records(df: pd.DataFrame, columns: list[str] | None = None) -> list[dict]:
         return []
     cols = [c for c in (columns or df.columns) if c in df.columns]
     return [{c: _clean(row[c]) for c in cols} for _, row in df[cols].iterrows()]
+
+
+def _pair_moves(squad, new_ids, by_id, entry, xp_h) -> list[dict]:
+    """Pair each player leaving with one arriving in the same position (priciest first)."""
+    out_ids = [i for i in squad if i not in new_ids]
+    in_ids = [i for i in new_ids if i not in squad]
+    moves = []
+    for pos in (1, 2, 3, 4):
+        outs = sorted(
+            (i for i in out_ids if by_id.get(i, {}).get("position") == pos),
+            key=lambda i: -(by_id.get(i, {}).get("price") or 0),
+        )
+        ins = sorted(
+            (i for i in in_ids if by_id.get(i, {}).get("position") == pos),
+            key=lambda i: -(by_id.get(i, {}).get("price") or 0),
+        )
+        for o, i in zip(outs, ins):
+            moves.append(
+                {
+                    "out": entry(o, "out", 0, squad.get(o)),
+                    "in": entry(i, "in", 0),
+                    "delta_xp": round(xp_h(i) - xp_h(o), 2),
+                }
+            )
+    moves.sort(key=lambda m: -m["delta_xp"])
+    return moves
 
 
 def _my_team_payload(report: WeeklyReport, players: list[dict[str, Any]]) -> dict | None:
@@ -92,28 +125,7 @@ def _my_team_payload(report: WeeklyReport, players: list[dict[str, Any]]) -> dic
         for n, pid in enumerate(g0.bench_ids, start=12):
             squad_wc.append(entry(pid, "bench", n))
 
-        wc_ids = {e["id"] for e in squad_wc}
-        out_ids = [i for i in mt.squad if i not in wc_ids]
-        in_ids = [e["id"] for e in squad_wc if e["id"] not in mt.squad]
-        moves = []
-        for pos in (1, 2, 3, 4):
-            outs = sorted(
-                (i for i in out_ids if (by_id.get(i, {}).get("position")) == pos),
-                key=lambda i: -(by_id.get(i, {}).get("price") or 0),
-            )
-            ins = sorted(
-                (i for i in in_ids if (by_id.get(i, {}).get("position")) == pos),
-                key=lambda i: -(by_id.get(i, {}).get("price") or 0),
-            )
-            for o, i in zip(outs, ins):
-                moves.append(
-                    {
-                        "out": entry(o, "out", 0, mt.squad.get(o)),
-                        "in": entry(i, "in", 0),
-                        "delta_xp": round(xp_h(i) - xp_h(o), 2),
-                    }
-                )
-        moves.sort(key=lambda m: -m["delta_xp"])
+        moves = _pair_moves(mt.squad, {e["id"] for e in squad_wc}, by_id, entry, xp_h)
         wildcard = {
             "event": int(wc.event),
             "gain": _clean(wc.gain_pts),
@@ -134,6 +146,24 @@ def _my_team_payload(report: WeeklyReport, players: list[dict[str, Any]]) -> dic
             ],
         }
 
+    recommended = None
+    if report.plan is not None:
+        g0 = report.plan.gameweeks[0]
+        xi = sorted(g0.starting_ids, key=lambda i: -(by_id.get(i, {}).get("xp") or 0.0))
+        vice = next((i for i in xi if i != g0.captain_id), None)
+        squad_rec = []
+        for n, pid in enumerate(g0.starting_ids, start=1):
+            role = "captain" if pid == g0.captain_id else "vice" if pid == vice else "XI"
+            squad_rec.append(entry(pid, role, n, mt.squad.get(pid)))
+        for n, pid in enumerate(g0.bench_ids, start=12):
+            squad_rec.append(entry(pid, "bench", n, mt.squad.get(pid)))
+        recommended = {
+            "event": int(g0.event),
+            "hits": int(g0.hits),
+            "squad": squad_rec,
+            "moves": _pair_moves(mt.squad, {e["id"] for e in squad_rec}, by_id, entry, xp_h),
+        }
+
     return {
         "bank": mt.bank,
         "free_transfers": mt.free_transfers,
@@ -142,11 +172,14 @@ def _my_team_payload(report: WeeklyReport, players: list[dict[str, Any]]) -> dic
         "chips_available": mt.chips_available,
         "current": current,
         "wildcard": wildcard,
+        "recommended": recommended,
         "history": _records(mt.history, ["event", "overall_points", "overall_rank", "event_transfers", "active_chip"]),
     }
 
 
-def build_payload(report: WeeklyReport) -> dict[str, Any]:
+def build_payload(
+    report: WeeklyReport, review: dict | None = None, deadline: str | None = None
+) -> dict[str, Any]:
     names = report.names
     club_name = dict(zip(report.teams["team_id"], report.teams["name"]))
     club_short = dict(zip(report.teams["team_id"], report.teams["short_name"]))
@@ -254,7 +287,9 @@ def build_payload(report: WeeklyReport) -> dict[str, Any]:
 
     return {
         "my_team": _my_team_payload(report, players),
+        "review": review,
         "meta": {
+            "deadline": deadline,
             "season": report.season,
             "next_gw": report.next_gw,
             "mode": report.mode,
@@ -310,6 +345,62 @@ def build_payload(report: WeeklyReport) -> dict[str, Any]:
     }
 
 
+def _deadline(gw: int) -> str | None:
+    """Official deadline of `gw` from the FPL API; None when offline."""
+    try:
+        with FplApiClient(snapshot=False) as api:
+            events = api.bootstrap_static()["events"]
+        return events[gw - 1].get("deadline_time")
+    except Exception:
+        return None
+
+
+def _review_for(report: WeeklyReport) -> dict | None:
+    """Review of the gameweek just played, judged on pre-deadline predictions."""
+    if report.my_team is None or report.next_gw <= 1 or not settings.team_id:
+        return None
+    gw = report.next_gw - 1
+    snap = load_snapshot(gw)
+    if snap:
+        xp = {int(k): float(v) for k, v in snap["xp"].items()}
+        source, recommended = "snapshot", snap.get("recommended")
+    else:
+        replay = build_weekly_report(as_of_gw=gw, horizon=1, n_sims=1, predictions_only=True)
+        xp = dict(zip(replay.xp_table["player_id"].astype(int), replay.xp_table["xp"].astype(float)))
+        source, recommended = "replay", None
+
+    players = pd.read_sql(
+        select(Player).where(Player.season == report.season), get_engine()
+    )
+    short = dict(zip(report.teams["team_id"], report.teams["short_name"]))
+    return build_review(
+        report.season,
+        settings.team_id,
+        gw,
+        xp,
+        source,
+        names=dict(zip(players["player_id"], players["web_name"])),
+        position_of=dict(zip(players["player_id"], players["position"])),
+        club_of=dict(zip(players["player_id"], players["team_id"])),
+        club_short={int(k): v for k, v in short.items()},
+        recommended=recommended,
+    )
+
+
+def _snapshot_payload(payload: dict[str, Any]) -> tuple[dict[int, float], list[dict] | None]:
+    """What to freeze for next week's review: every player's xP and the squad advised."""
+    xp = {p["id"]: p["xp"] for p in payload["players"] if p["xp"] is not None}
+    mt = payload.get("my_team")
+    advised = None
+    if mt:
+        wc_open = "wildcard" in mt["chips_available"]
+        source = (mt["wildcard"] if wc_open and mt["wildcard"] else mt["recommended"]) or {}
+        advised = [
+            {"id": e["id"], "role": e["role"], "order": e["order"]} for e in source.get("squad", [])
+        ] or None
+    return xp, advised
+
+
 def export_site_data(
     out_dir: Path,
     horizon: int = 6,
@@ -321,7 +412,9 @@ def export_site_data(
     report = report or build_weekly_report(
         horizon=horizon, n_sims=n_sims, as_of_gw=as_of_gw
     )
-    payload = build_payload(report)
+    payload = build_payload(report, review=_review_for(report), deadline=_deadline(report.next_gw))
+    xp, advised = _snapshot_payload(payload)
+    write_snapshot(report.next_gw, xp, advised, payload["meta"]["generated_at"])
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / "data.json"
     target.write_text(json.dumps(payload, separators=(",", ":")))

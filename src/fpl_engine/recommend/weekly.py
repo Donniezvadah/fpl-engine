@@ -211,9 +211,12 @@ def build_weekly_report(
     n_sims: int = 10_000,
     train_seasons: list[str] | None = None,
     as_of_gw: int | None = None,
+    predictions_only: bool = False,
 ) -> WeeklyReport:
     """`as_of_gw` replays a past deadline: models see only GWs before it (for
-    testing the full pipeline out of season)."""
+    testing the full pipeline out of season). A replay treats every player as
+    available, since the stored injury flags are today's, not that deadline's.
+    `predictions_only` skips the planner, chips and simulation: just the xP table."""
     season = season or settings.season
     rules = rules_for(season)
     gw = as_of_gw if as_of_gw is not None else next_gameweek(season)
@@ -223,7 +226,7 @@ def build_weekly_report(
         train_seasons = training_seasons_for(season)
     seasons = [*train_seasons, season]
     rows, players = build_prediction_rows(seasons, season, gws, cutoff_gw=as_of_gw)
-    availability = availability_for_rows(rows, players)
+    availability = None if as_of_gw is not None else availability_for_rows(rows, players)
 
     train_df = build_feature_frame(seasons)
     train_df = train_df[train_df["minutes"].notna()]
@@ -266,6 +269,13 @@ def build_weekly_report(
     chips: list[ChipEvaluation] = []
     my_team: MyTeamInfo | None = None
     mode = "draft"
+    if predictions_only:
+        return WeeklyReport(
+            season=season, next_gw=gw, mode=mode,
+            xp_table=_xp_table(gw_xp, names, own, gw),
+            plan=None, draft=None, captains=[], chips=[],
+            differentials=pd.DataFrame(), price_watch=pd.DataFrame(), names=names,
+        )
     try:
         squad, bank, fts, chip_state, team_value = load_my_state(season, gw)
         mode = "linked"
@@ -396,6 +406,13 @@ def _my_team_info(
         history=state[["event", "overall_points", "overall_rank", "event_transfers", "active_chip"]],
         wildcard=max(wildcards, key=lambda c: c.gain_pts) if wildcards else None,
     )
+
+
+def _xp_table(gw_xp: pd.DataFrame, names: dict[int, str], own: dict[int, float], gw: int) -> pd.DataFrame:
+    table = gw_xp[gw_xp["event"] == gw].copy()
+    table["name"] = table["player_id"].map(names)
+    table["ownership"] = table["player_id"].map(own)
+    return table.sort_values("xp", ascending=False)
 
 
 def _captain_reason(pid: int, pred: pd.DataFrame, names: dict[int, str]) -> str:

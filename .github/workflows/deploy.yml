@@ -19,7 +19,7 @@ on:
       - ".github/workflows/deploy.yml"
 
 permissions:
-  contents: read
+  contents: write  # lets the build save each week's predictions (reviews/)
   pages: write
   id-token: write
 
@@ -80,6 +80,19 @@ jobs:
           # Falls back to 0 (draft mode) when the variable is not configured.
           FPL_TEAM_ID: ${{ vars.FPL_TEAM_ID || 0 }}
         run: uv run fpl export --out web/public/data --horizon 6 --sims 10000
+
+      # Freeze this week's predictions in the repo so next week's review can judge
+      # the models on what they said before the deadline. A push made with the
+      # workflow token does not start another run, so this cannot loop.
+      - name: Save this week's predictions
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reviews
+          if ! git diff --cached --quiet; then
+            git commit -m "Save gameweek predictions for the weekly review"
+            git pull --rebase origin main && git push origin HEAD:main || echo "could not save predictions; review will fall back to a replay"
+          fi
 
       - uses: actions/setup-node@v4
         with:

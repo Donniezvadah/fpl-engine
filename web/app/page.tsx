@@ -13,11 +13,12 @@ import { Badge, Card, StatTile, Table } from "@/components/ui";
 import { CaptainChart, HorizonChart } from "@/components/charts";
 import { PlayerExplorer } from "@/components/explorer";
 import { MyTeamView } from "@/components/my-team";
+import { ReviewView } from "@/components/review";
 
 export default function Dashboard() {
   const [data, setData] = useState<Dataset | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"team" | "overview" | null>(null);
+  const [tab, setTab] = useState<"team" | "review" | "overview" | null>(null);
 
   useEffect(() => {
     loadDataset()
@@ -55,7 +56,8 @@ export default function Dashboard() {
         <nav className="mt-4 flex gap-1 border-b border-border-token" aria-label="Views">
           {(
             [
-              ["team", "My Team"],
+              ["team", `My Team · GW${data.meta.next_gw}`],
+              ...(data.review ? ([["review", `Last week · GW${data.review.event}`]] as const) : []),
               ["overview", "Overview & players"],
             ] as const
           ).map(([key, label]) => (
@@ -75,7 +77,13 @@ export default function Dashboard() {
         </nav>
       )}
       <div className="mt-6">
-        {view === "team" ? <MyTeamView data={data} /> : <Content data={data} />}
+        {view === "team" ? (
+          <MyTeamView data={data} />
+        ) : view === "review" ? (
+          <ReviewView data={data} />
+        ) : (
+          <Content data={data} />
+        )}
       </div>
       <footer className="text-xs text-muted mt-8 pb-4">
         Generated {new Date(data.meta.generated_at).toLocaleString()} ·{" "}
@@ -103,9 +111,23 @@ function Content({ data }: { data: Dataset }) {
   const squadCost = data.squad?.cost ?? null;
 
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-1 gap-4">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatTile label="Next deadline" value={`GW${data.meta.next_gw}`} />
+        <StatTile
+          label="Next deadline"
+          value={`GW${data.meta.next_gw}`}
+          hint={
+            data.meta.deadline
+              ? new Date(data.meta.deadline).toLocaleString([], {
+                  weekday: "short",
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : undefined
+          }
+        />
         <StatTile
           label="Best captain"
           value={data.captains[0]?.name ?? "—"}
@@ -134,7 +156,7 @@ function Content({ data }: { data: Dataset }) {
 
       <PlayerExplorer data={data} />
 
-      <div className="grid lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card
           title="Captaincy"
           subtitle="expected points with simulated floor→ceiling (Monte Carlo)"
@@ -224,7 +246,7 @@ function Content({ data }: { data: Dataset }) {
         </Card>
       )}
 
-      <div className="grid lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card title="Chip timing" subtitle="marginal EV vs the no-chip plan">
           {data.chips.length ? (
             <Table

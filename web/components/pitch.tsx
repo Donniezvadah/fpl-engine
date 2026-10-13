@@ -43,7 +43,7 @@ function PlayerCard({
       onClick={() => onSelect?.(p.id)}
       disabled={!onSelect}
       title={p.news || `${p.name} · ${p.club}`}
-      className={`relative w-[74px] sm:w-[96px] rounded-lg bg-white/95 text-neutral-900 shadow-sm text-center px-1 py-1.5 transition ${
+      className={`relative w-[60px] sm:w-[96px] rounded-lg bg-white/95 text-neutral-900 shadow-sm text-center px-0.5 sm:px-1 py-1.5 transition ${
         onSelect ? "hover:-translate-y-0.5 cursor-pointer" : "cursor-default"
       } ${selected ? "ring-2 ring-series-1" : ""}`}
     >
@@ -64,9 +64,9 @@ function PlayerCard({
         </span>
       )}
       <div className="text-[10px] font-semibold text-neutral-500 leading-none">{p.club_short}</div>
-      <div className="text-xs font-semibold truncate mt-0.5">{p.name}</div>
-      <div className="text-[10px] text-neutral-500 tabular-nums">{opp}</div>
-      <div className="text-xs font-bold tabular-nums mt-0.5">{fmtNum(xp, 1)} xP</div>
+      <div className="text-[10px] sm:text-xs font-semibold truncate mt-0.5">{p.name}</div>
+      <div className="text-[9px] sm:text-[10px] text-neutral-500 tabular-nums truncate">{opp}</div>
+      <div className="text-[11px] sm:text-xs font-bold tabular-nums mt-0.5">{fmtNum(xp, 1)} xP</div>
       <div className="text-[10px] text-neutral-500 tabular-nums">{fmtPrice(p.price)}</div>
     </button>
   );
@@ -115,14 +115,14 @@ export function Pitch({
         }}
       >
         {[4, 3, 2, 1].map((pos) => (
-          <div key={pos} className="flex justify-center gap-2 sm:gap-3">
+          <div key={pos} className="flex justify-center gap-1.5 sm:gap-3">
             {row(pos).map(render)}
           </div>
         ))}
       </div>
       <div className="mt-2 rounded-xl bg-surface-2 px-2 py-3">
         <div className="text-[11px] text-muted mb-2 px-1">Bench (auto-sub order)</div>
-        <div className="flex justify-center gap-2 sm:gap-3">
+        <div className="flex justify-center gap-1.5 sm:gap-3">
           {lineup.bench
             .map((id) => byId.get(id))
             .filter((p): p is Player => !!p)

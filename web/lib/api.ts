@@ -14,6 +14,7 @@ export interface Meta {
   horizon_gws: number[];
   generated_at: string;
   player_count: number;
+  deadline: string | null;
 }
 
 export interface Player {
@@ -138,6 +139,61 @@ export interface RankPoint {
   active_chip: string | null;
 }
 
+export interface ReviewPlayer {
+  id: number;
+  name: string;
+  club_short: string;
+  position: number | null;
+  role: string; // captain | vice | XI | bench
+  minutes: number;
+  points: number;
+  xp: number;
+  subbed_in: boolean;
+  subbed_out: boolean;
+}
+
+export interface Review {
+  event: number;
+  finished: boolean;
+  provisional: boolean;
+  points: number;
+  gross_points: number;
+  hit: number;
+  bench_points: number;
+  average: number | null;
+  rank_before: number | null;
+  rank_after: number | null;
+  chip: string | null;
+  captain: string;
+  xi_xp: number;
+  players: ReviewPlayer[];
+  what_if: { label: string; points: number }[];
+  comments: string[];
+  recommended_overlap: {
+    shared: number;
+    you_only: string[];
+    engine_only: { name: string; points: number }[];
+  } | null;
+  model: {
+    n: number;
+    mae: number;
+    rmse: number;
+    spearman: number;
+    top10_actual: number;
+    league_actual: number;
+    source: "snapshot" | "replay";
+    calibration: { bin: string; xp: number; actual: number; n: number }[];
+    top_scorers: { name: string; points: number; xp: number }[];
+  };
+}
+
+export interface RecommendedPlan {
+  event: number;
+  hits: number;
+  squad: TeamEntry[];
+  moves: WildcardMove[];
+}
+
 export interface MyTeamData {
   bank: number;
   free_transfers: number;
@@ -146,11 +202,13 @@ export interface MyTeamData {
   chips_available: string[];
   current: TeamEntry[];
   wildcard: WildcardPlan | null;
+  recommended: RecommendedPlan | null;
   history: RankPoint[];
 }
 
 export interface Dataset {
   my_team: MyTeamData | null;
+  review: Review | null;
   meta: Meta;
   captains: CaptainOption[];
   chips: ChipEval[];
