@@ -55,8 +55,12 @@ def update_current_season(season: str | None = None, with_player_history: bool =
             elements = bootstrap["elements"]
             # Skip players with zero minutes: they have no history rows worth fetching.
             with_minutes = [e for e in elements if e.get("minutes", 0) > 0]
+            completed = store.completed_fixture_ids(fixtures)
             n_rows = 0
             with session_scope() as session:
+                counts["unplayed_rows_dropped"] = store.delete_unplayed_history(
+                    session, season, completed
+                )
                 for e in track(with_minutes, description="player histories"):
                     summary = api.element_summary(e["id"])
                     n_rows += store.upsert_player_history(
@@ -67,6 +71,7 @@ def update_current_season(season: str | None = None, with_player_history: bool =
                         position=e["element_type"],
                         team_id=e["team"],
                         history_rows=summary.get("history", []),
+                        completed=completed,
                     )
             counts["player_gameweek_rows"] = n_rows
 

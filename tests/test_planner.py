@@ -82,3 +82,14 @@ def test_wildcard_gw_takes_no_hits():
     )
     assert plan.gameweeks[0].hits == 0
     assert len(plan.gameweeks[0].transfers_in) >= 3
+
+
+def test_wildcard_week_does_not_add_a_free_transfer():
+    horizon = [10, 11]
+    m = make_matrix(horizon)
+    owned = _base_squad(m, horizon)
+    plan = TransferPlanner(RULES).plan(
+        m, horizon, owned, bank=0, free_transfers=1, forced_chip=("wildcard", 10)
+    )
+    # The banked transfer carries over; the wildcard week's own is spent on the chip.
+    assert plan.gameweeks[1].free_transfers_before == 1

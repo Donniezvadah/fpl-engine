@@ -94,9 +94,29 @@ class TestFreeTransferDerivation:
         from fpl_engine.rules import rules_for
 
         # A wildcard rebuild leaves the bank untouched: two banked going in,
-        # still two after, plus the one earned for the following week.
+        # still two after. The chip week's own free transfer is spent on the
+        # chip, so nothing is added for it.
         state = self._state([(1, 0, None), (2, 0, None), (3, 11, "wildcard")])
-        assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 3
+        assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 2
+
+    def test_bank_grows_again_after_the_chip_week(self):
+        from fpl_engine.recommend.weekly import free_transfers_for_next_gw
+        from fpl_engine.rules import rules_for
+
+        # The 2026-27 entry this was found on: one banked into a GW6 Wildcard,
+        # none used in GW7, so two for GW8 (the engine had said three).
+        state = self._state(
+            [(1, 0, None), (2, 0, None), (3, 3, "3xc"), (4, 2, None),
+             (5, 2, None), (6, 0, "wildcard"), (7, 0, None)]
+        )
+        assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 2
+
+    def test_free_hit_week_also_freezes_the_bank(self):
+        from fpl_engine.recommend.weekly import free_transfers_for_next_gw
+        from fpl_engine.rules import rules_for
+
+        state = self._state([(1, 0, None), (2, 0, None), (3, 15, "freehit")])
+        assert free_transfers_for_next_gw(state, rules_for("2026-27")) == 2
 
 
 class TestSellPriceEstimation:

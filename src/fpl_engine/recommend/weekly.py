@@ -192,16 +192,18 @@ def free_transfers_for_next_gw(state: pd.DataFrame, rules) -> int:
     The API publishes how many transfers you made, never how many free ones you
     have, so this replays the official banking rule over the season so far. The
     count starts at zero because the opening squad is built with unlimited
-    transfers; the first free transfer is earned after the GW1 deadline. Wildcard
-    and Free Hit gameweeks are skipped, since transfers made under those chips do
-    not consume the bank.
+    transfers; the first free transfer is earned after the GW1 deadline.
+
+    A Wildcard or Free Hit gameweek leaves the bank exactly as it was: the banked
+    transfers carry over, but that gameweek's own free transfer is spent on the
+    chip, so there is no +1. Treating the chip week as an ordinary week with no
+    transfers made counted one transfer too many for every chip played.
     """
     ft = 0
     for _, row in state.sort_values("event").iterrows():
-        made = int(row["event_transfers"] or 0)
         if row["active_chip"] in ("wildcard", "freehit"):
-            made = 0
-        ft = next_free_transfers(ft, made, rules.transfers)
+            continue
+        ft = next_free_transfers(ft, int(row["event_transfers"] or 0), rules.transfers)
     return ft
 
 

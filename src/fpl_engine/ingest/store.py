@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from ..db.models import Fixture, MyTeamPick, MyTeamState, Player, PlayerGameweek, Team
@@ -90,6 +91,31 @@ def upsert_fixtures(session: Session, season: str, fixtures: list[dict]) -> int:
     return len(fixtures)
 
 
+def completed_fixture_ids(fixtures: list[dict]) -> set[int]:
+    """Fixtures that have reached full time.
+
+    Once a gameweek is under way, element-summary lists every one of its fixtures
+    in each player's history -- including matches not yet kicked off, as rows of
+    zeros. Stored as they come, those read as games the player sat out: Arsenal's
+    unplayed GW7 match took Raya's start probability from 0.98 to 0.73. Only
+    matches at full time count. `finished` lags the final whistle by up to a day,
+    so `finished_provisional` (set at full time) is accepted too.
+    """
+    return {
+        f["id"] for f in fixtures if f.get("finished") or f.get("finished_provisional")
+    }
+
+
+def delete_unplayed_history(session: Session, season: str, completed: set[int]) -> int:
+    """Drop player rows for fixtures not yet completed (placeholders from earlier runs)."""
+    result = session.execute(
+        delete(PlayerGameweek).where(
+            PlayerGameweek.season == season, PlayerGameweek.fixture_id.not_in(completed)
+        )
+    )
+    return result.rowcount or 0
+
+
 def upsert_player_history(
     session: Session,
     season: str,
@@ -98,10 +124,16 @@ def upsert_player_history(
     position: int,
     team_id: int,
     history_rows: list[dict],
+    completed: set[int] | None = None,
 ) -> int:
-    """Persist element-summary `history` rows (one per fixture played this season)."""
+    """Persist element-summary `history` rows (one per fixture played this season).
+
+    Rows for fixtures outside `completed` are skipped; see `completed_fixture_ids`.
+    """
     n = 0
     for h in history_rows:
+        if completed is not None and h["fixture"] not in completed:
+            continue
         session.merge(
             PlayerGameweek(
                 season=season,

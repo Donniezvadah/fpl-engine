@@ -345,21 +345,41 @@ def build_payload(
     }
 
 
-def _deadline(gw: int) -> str | None:
-    """Official deadline of `gw` from the FPL API; None when offline."""
+def _events() -> list[dict]:
+    """The FPL API's gameweek list; empty when offline."""
     try:
         with FplApiClient(snapshot=False) as api:
-            events = api.bootstrap_static()["events"]
-        return events[gw - 1].get("deadline_time")
+            return api.bootstrap_static()["events"]
     except Exception:
-        return None
+        return []
 
 
-def _review_for(report: WeeklyReport) -> dict | None:
-    """Review of the gameweek just played, judged on pre-deadline predictions."""
+def _deadline(gw: int, events: list[dict]) -> str | None:
+    """Official deadline of `gw`; None when offline."""
+    return events[gw - 1].get("deadline_time") if len(events) >= gw else None
+
+
+def last_finished_gw(next_gw: int, events: list[dict]) -> int:
+    """The most recent gameweek before `next_gw` whose matches have all been played.
+
+    Between a deadline and the last match of that gameweek, the previous
+    gameweek is the latest one that can be reviewed: scoring a half-played week
+    counts players whose matches are still to come as having missed the game, and
+    the autosub logic then swaps them out. Offline, assume the week just gone.
+    """
+    if not events:
+        return next_gw - 1
+    finished = [e["id"] for e in events if e.get("finished") and e["id"] < next_gw]
+    return max(finished, default=0)
+
+
+def _review_for(report: WeeklyReport, events: list[dict]) -> dict | None:
+    """Review of the last finished gameweek, judged on pre-deadline predictions."""
     if report.my_team is None or report.next_gw <= 1 or not settings.team_id:
         return None
-    gw = report.next_gw - 1
+    gw = last_finished_gw(report.next_gw, events)
+    if gw < 1:
+        return None
     snap = load_snapshot(gw)
     if snap:
         xp = {int(k): float(v) for k, v in snap["xp"].items()}
@@ -412,7 +432,10 @@ def export_site_data(
     report = report or build_weekly_report(
         horizon=horizon, n_sims=n_sims, as_of_gw=as_of_gw
     )
-    payload = build_payload(report, review=_review_for(report), deadline=_deadline(report.next_gw))
+    events = _events()
+    payload = build_payload(
+        report, review=_review_for(report, events), deadline=_deadline(report.next_gw, events)
+    )
     xp, advised = _snapshot_payload(payload)
     write_snapshot(report.next_gw, xp, advised, payload["meta"]["generated_at"])
     out_dir.mkdir(parents=True, exist_ok=True)

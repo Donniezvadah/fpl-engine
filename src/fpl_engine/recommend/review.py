@@ -188,12 +188,13 @@ def build_review(
     what_if: list[dict] = []
     if prev is not None:
         old = _squad_from_picks(prev["picks"], position_of, club_of)
+        unchanged = "no wildcard" if this.get("active_chip") == "wildcard" else "no transfers"
         what_if.append(
-            {"label": f"Your GW{gw - 1} squad, no wildcard", "points": _score(old, pts, mins, rules)[0]}
+            {"label": f"Your GW{gw - 1} squad, {unchanged}", "points": _score(old, pts, mins, rules)[0]}
         )
     if recommended:
         rec = _squad_from_picks(_rec_to_picks(recommended), position_of, club_of)
-        what_if.append({"label": "The engine's wildcard squad", "points": _score(rec, pts, mins, rules)[0]})
+        what_if.append({"label": "The engine's suggested squad", "points": _score(rec, pts, mins, rules)[0]})
     best_cap = max(xi_final, key=lambda i: pts.get(i, 0))
     what_if.append(
         {
@@ -332,7 +333,7 @@ def _comments(r: dict[str, Any]) -> list[str]:
     if ov and ov["engine_only"]:
         missed = ", ".join(f"{e['name']} ({e['points']})" for e in ov["engine_only"])
         out.append(
-            f"You matched {ov['shared']} of 15 players in the engine's wildcard squad. "
+            f"You matched {ov['shared']} of 15 players in the engine's suggested squad. "
             f"The ones you left out scored: {missed}."
         )
 

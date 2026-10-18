@@ -170,8 +170,9 @@ class TransferPlanner:
                 prev_gw = T[k - 1]
                 prev_transfers = pulp.lpSum(tin[i][prev_gw] for i in ids)
                 if chip_name == "wildcard" and prev_gw == chip_gw:
-                    # Wildcard transfers don't consume FTs; bank rolls forward +1.
-                    prob += ft[gw] <= ft[prev_gw] + 1
+                    # Wildcard transfers don't consume FTs, but the week's own FT
+                    # goes into the chip: the bank carries over unchanged.
+                    prob += ft[gw] <= ft[prev_gw]
                 else:
                     prob += ft[gw] <= ft[prev_gw] - prev_transfers + hit[prev_gw] + 1
 

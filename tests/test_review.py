@@ -61,3 +61,15 @@ def test_comments_are_honest_when_the_old_squad_scored_more():
     assert "1 point (doubled)" in text  # singular
     assert "did not pay off straight away" in text
     assert "B (15) would have paid far more" in text
+
+
+def test_review_waits_for_the_gameweek_to_finish():
+    from fpl_engine.recommend.export import last_finished_gw
+
+    events = [{"id": g, "finished": g <= 6} for g in range(1, 39)]
+    # GW7's deadline has passed but its matches are still being played: GW6 is
+    # the latest week that can be scored honestly.
+    assert last_finished_gw(8, events) == 6
+    events[6]["finished"] = True
+    assert last_finished_gw(8, events) == 7
+    assert last_finished_gw(8, []) == 7  # offline
